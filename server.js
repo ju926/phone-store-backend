@@ -6,129 +6,215 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const FILE = "./orders.json";
-const USERS = "./users.json";
+/* FILES */
+const ORDERS_FILE = "./orders.json";
+const USERS_FILE = "./users.json";
 
-/* SAFE READ/WRITE */
-const read = (f) => fs.existsSync(f) ? JSON.parse(fs.readFileSync(f)) : [];
-const write = (f,d) => fs.writeFileSync(f, JSON.stringify(d,null,2));
+/* ================= SAFE FILE HANDLING ================= */
+
+function read(file){
+  try{
+    if(!fs.existsSync(file)) return [];
+    const data = fs.readFileSync(file);
+    return JSON.parse(data || "[]");
+  }catch(e){
+    console.log("Read error:", e);
+    return [];
+  }
+}
+
+function write(file,data){
+  try{
+    fs.writeFileSync(file, JSON.stringify(data,null,2));
+  }catch(e){
+    console.log("Write error:", e);
+  }
+}
+
+/* ================= HOME ================= */
+
+app.get("/",(req,res)=>{
+  res.send("Backend Running ✔");
+});
 
 /* ================= USERS ================= */
 
-/* REGISTER (simple) */
+/* REGISTER */
 app.post("/register",(req,res)=>{
-  let users = read(USERS);
+
+  let users = read(USERS_FILE);
+
+  const { name, phone, password } = req.body;
+
+  if(!name || !phone || !password){
+    return res.status(400).json({msg:"Missing fields"});
+  }
+
+  /* prevent duplicate */
+  let exists = users.find(u=>u.phone===phone);
+
+  if(exists){
+    return res.status(400).json({msg:"User exists"});
+  }
 
   const user = {
     id: Date.now(),
-    name: req.body.name,
-    phone: req.body.phone,
-    password: req.body.password
+    name,
+    phone,
+    password
   };
 
   users.push(user);
-  write(USERS,users);
+  write(USERS_FILE,users);
 
   res.json(user);
 });
 
 /* LOGIN */
 app.post("/login",(req,res)=>{
-  let users = read(USERS);
+
+  let users = read(USERS_FILE);
+
+  const { phone, password } = req.body;
 
   const user = users.find(
-    u=>u.phone===req.body.phone && u.password===req.body.password
+    u => u.phone === phone && u.password === password
   );
 
-  if(!user) return res.status(401).json({msg:"invalid"});
+  if(!user){
+    return res.status(401).json({msg:"Invalid login"});
+  }
 
   res.json(user);
 });
 
 /* ================= ORDERS ================= */
 
+/* GET ALL (ADMIN) */
 app.get("/orders",(req,res)=>{
-  res.json(read(FILE));
+  res.json(read(ORDERS_FILE));
 });
 
-/* CREATE ORDER (WITH DELIVERY INFO) */
+/* CREATE ORDER */
 app.post("/order",(req,res)=>{
-  let orders = read(FILE);
+
+  let orders = read(ORDERS_FILE);
+
+  const {
+    userId,
+    name,
+    phone,
+    location,
+    method,
+    transactionId,
+    amount,
+    cart,
+    time
+  } = req.body;
+
+  if(!name || !phone || !location || !method || !transactionId){
+    return res.status(400).json({msg:"Missing order fields"});
+  }
 
   const order = {
     id: Date.now(),
-    userId: req.body.userId,
-    name: req.body.name,
-    phone: req.body.phone,
-    location: req.body.location,
 
-    method: req.body.method,
-    transactionId: req.body.transactionId,
-    amount: req.body.amount,
-    cart: req.body.cart,
+    /* USER */
+    userId,
+    name,
+    phone,
+    location,
 
+    /* PAYMENT */
+    method,
+    transactionId,
+    amount,
+    cart,
+
+    /* STATUS */
     status: "pending",
     tracking: "Order received",
-    time: req.body.time
+
+    time
   };
 
   orders.push(order);
-  write(FILE,orders);
+  write(ORDERS_FILE,orders);
 
   res.json(order);
 });
 
-/* STATUS UPDATE */
+/* APPROVE / REJECT */
 app.post("/order-status",(req,res)=>{
-  let orders = read(FILE);
 
-  const {id,status} = req.body;
+  let orders = read(ORDERS_FILE);
 
-  let i = orders.findIndex(o=>o.id==id);
+  const { id, status } = req.body;
 
-  if(i===-1) return res.status(404).json({msg:"not found"});
+  let index = orders.findIndex(o => o.id == id);
 
-/* ❌ DELETE IF REJECTED */
-  if(status==="rejected"){
-    orders = orders.filter(o=>o.id!=id);
-    write(FILE,orders);
-    return res.json({msg:"deleted"});
+  if(index === -1){
+    return res.status(404).json({msg:"Order not found"});
   }
 
-  orders[i].status = status;
-
-  if(status==="approved"){
-    orders[i].tracking="Payment confirmed";
+  /* ❌ DELETE REJECTED */
+  if(status === "rejected"){
+    orders = orders.filter(o => o.id != id);
+    write(ORDERS_FILE,orders);
+    return res.json({msg:"Order deleted"});
   }
 
-  write(FILE,orders);
+  if(orders[index].status !== "pending"){
+    return res.status(400).json({msg:"Already processed"});
+  }
 
-  res.json(orders[i]);
+  orders[index].status = status;
+
+  if(status === "approved"){
+    orders[index].tracking = "Payment confirmed";
+  }
+
+  write(ORDERS_FILE,orders);
+
+  res.json(orders[index]);
 });
 
-/* TRACKING UPDATE */
+/* UPDATE TRACKING */
 app.post("/tracking",(req,res)=>{
-  let orders = read(FILE);
 
-  let o = orders.find(x=>x.id==req.body.id);
+  let orders = read(ORDERS_FILE);
 
-  if(!o) return res.status(404).json({msg:"not found"});
+  const { id, tracking } = req.body;
 
-  o.tracking = req.body.tracking;
+  let order = orders.find(o => o.id == id);
 
-  write(FILE,orders);
+  if(!order){
+    return res.status(404).json({msg:"Order not found"});
+  }
 
-  res.json(o);
+  order.tracking = tracking;
+
+  write(ORDERS_FILE,orders);
+
+  res.json(order);
 });
 
-/* CUSTOMER ORDERS */
+/* CUSTOMER ORDERS (BY PHONE) */
 app.get("/my-orders/:phone",(req,res)=>{
-  let orders = read(FILE);
 
-  res.json(
-    orders.filter(o=>o.phone===req.params.phone)
+  let orders = read(ORDERS_FILE);
+
+  const result = orders.filter(
+    o => o.phone === req.params.phone
   );
+
+  res.json(result);
 });
+
+/* ================= START ================= */
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT,()=>console.log("running"));
+
+app.listen(PORT,()=>{
+  console.log("Server running on port", PORT);
+});
