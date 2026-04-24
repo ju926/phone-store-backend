@@ -8,30 +8,26 @@ app.use(express.json());
 
 const FILE = "./orders.json";
 
-/* READ */
-function getOrders(){
-  if(!fs.existsSync(FILE)) return [];
-  return JSON.parse(fs.readFileSync(FILE));
-}
+/* SAFE READ/WRITE */
+const read = () =>
+  fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE)) : [];
 
-/* SAVE */
-function saveOrders(data){
+const write = (data) =>
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
-}
 
 /* HOME */
-app.get("/", (req,res)=>{
-  res.send("Backend running ✔");
+app.get("/", (req, res) => {
+  res.send("Backend Running ✔");
 });
 
 /* GET ORDERS */
-app.get("/orders",(req,res)=>{
-  res.json(getOrders());
+app.get("/orders", (req, res) => {
+  res.json(read());
 });
 
 /* CREATE ORDER */
-app.post("/order",(req,res)=>{
-  let orders = getOrders();
+app.post("/order", (req, res) => {
+  let orders = read();
 
   const order = {
     id: Date.now(),
@@ -40,36 +36,74 @@ app.post("/order",(req,res)=>{
     amount: req.body.amount,
     cart: req.body.cart,
     time: req.body.time,
-    status: "pending"
+    status: "pending",
+    tracking: "Order received"
   };
 
   orders.push(order);
-  saveOrders(orders);
+  write(orders);
 
   res.json(order);
 });
 
-/* UPDATE STATUS */
-app.post("/order-status",(req,res)=>{
-  let orders = getOrders();
+/* APPROVE / REJECT */
+app.post("/order-status", (req, res) => {
+  let orders = read();
 
   const { id, status } = req.body;
 
-  const index = orders.findIndex(o => o.id == id);
+  let i = orders.findIndex(o => o.id == id);
 
-  if(index === -1){
-    return res.status(404).json({message:"Order not found"});
+  if (i === -1) return res.status(404).json({ msg: "Not found" });
+
+  /* ❌ AUTO DELETE REJECTED */
+  if (status === "rejected") {
+    orders = orders.filter(o => o.id != id);
+    write(orders);
+    return res.json({ msg: "deleted" });
   }
 
-  if(orders[index].status !== "pending"){
-    return res.status(400).json({message:"Already processed"});
+  if (orders[i].status !== "pending") {
+    return res.status(400).json({ msg: "Already processed" });
   }
 
-  orders[index].status = status;
-  saveOrders(orders);
+  orders[i].status = status;
 
-  res.json({message:"Updated"});
+  if (status === "approved") {
+    orders[i].tracking = "Payment confirmed";
+  }
+
+  write(orders);
+
+  res.json(orders[i]);
 });
 
+/* TRACKING UPDATE (ADMIN) */
+app.post("/tracking", (req, res) => {
+  let orders = read();
+
+  const { id, tracking } = req.body;
+
+  let order = orders.find(o => o.id == id);
+
+  if (!order) return res.status(404).json({ msg: "Not found" });
+
+  order.tracking = tracking;
+
+  write(orders);
+
+  res.json(order);
+});
+
+/* CUSTOMER TRACKING */
+app.get("/my-orders/:tx", (req, res) => {
+  let orders = read();
+
+  res.json(
+    orders.filter(o => o.transactionId === req.params.tx)
+  );
+});
+
+/* START */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=> console.log("Server running"));
+app.listen(PORT, () => console.log("Running"));
