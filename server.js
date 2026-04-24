@@ -7,103 +7,128 @@ app.use(cors());
 app.use(express.json());
 
 const FILE = "./orders.json";
+const USERS = "./users.json";
 
 /* SAFE READ/WRITE */
-const read = () =>
-  fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE)) : [];
+const read = (f) => fs.existsSync(f) ? JSON.parse(fs.readFileSync(f)) : [];
+const write = (f,d) => fs.writeFileSync(f, JSON.stringify(d,null,2));
 
-const write = (data) =>
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+/* ================= USERS ================= */
 
-/* HOME */
-app.get("/", (req, res) => {
-  res.send("Backend Running ✔");
+/* REGISTER (simple) */
+app.post("/register",(req,res)=>{
+  let users = read(USERS);
+
+  const user = {
+    id: Date.now(),
+    name: req.body.name,
+    phone: req.body.phone,
+    password: req.body.password
+  };
+
+  users.push(user);
+  write(USERS,users);
+
+  res.json(user);
 });
 
-/* GET ORDERS */
-app.get("/orders", (req, res) => {
-  res.json(read());
+/* LOGIN */
+app.post("/login",(req,res)=>{
+  let users = read(USERS);
+
+  const user = users.find(
+    u=>u.phone===req.body.phone && u.password===req.body.password
+  );
+
+  if(!user) return res.status(401).json({msg:"invalid"});
+
+  res.json(user);
 });
 
-/* CREATE ORDER */
-app.post("/order", (req, res) => {
-  let orders = read();
+/* ================= ORDERS ================= */
+
+app.get("/orders",(req,res)=>{
+  res.json(read(FILE));
+});
+
+/* CREATE ORDER (WITH DELIVERY INFO) */
+app.post("/order",(req,res)=>{
+  let orders = read(FILE);
 
   const order = {
     id: Date.now(),
+    userId: req.body.userId,
+    name: req.body.name,
+    phone: req.body.phone,
+    location: req.body.location,
+
     method: req.body.method,
     transactionId: req.body.transactionId,
     amount: req.body.amount,
     cart: req.body.cart,
-    time: req.body.time,
+
     status: "pending",
-    tracking: "Order received"
+    tracking: "Order received",
+    time: req.body.time
   };
 
   orders.push(order);
-  write(orders);
+  write(FILE,orders);
 
   res.json(order);
 });
 
-/* APPROVE / REJECT */
-app.post("/order-status", (req, res) => {
-  let orders = read();
+/* STATUS UPDATE */
+app.post("/order-status",(req,res)=>{
+  let orders = read(FILE);
 
-  const { id, status } = req.body;
+  const {id,status} = req.body;
 
-  let i = orders.findIndex(o => o.id == id);
+  let i = orders.findIndex(o=>o.id==id);
 
-  if (i === -1) return res.status(404).json({ msg: "Not found" });
+  if(i===-1) return res.status(404).json({msg:"not found"});
 
-  /* ❌ AUTO DELETE REJECTED */
-  if (status === "rejected") {
-    orders = orders.filter(o => o.id != id);
-    write(orders);
-    return res.json({ msg: "deleted" });
-  }
-
-  if (orders[i].status !== "pending") {
-    return res.status(400).json({ msg: "Already processed" });
+/* ❌ DELETE IF REJECTED */
+  if(status==="rejected"){
+    orders = orders.filter(o=>o.id!=id);
+    write(FILE,orders);
+    return res.json({msg:"deleted"});
   }
 
   orders[i].status = status;
 
-  if (status === "approved") {
-    orders[i].tracking = "Payment confirmed";
+  if(status==="approved"){
+    orders[i].tracking="Payment confirmed";
   }
 
-  write(orders);
+  write(FILE,orders);
 
   res.json(orders[i]);
 });
 
-/* TRACKING UPDATE (ADMIN) */
-app.post("/tracking", (req, res) => {
-  let orders = read();
+/* TRACKING UPDATE */
+app.post("/tracking",(req,res)=>{
+  let orders = read(FILE);
 
-  const { id, tracking } = req.body;
+  let o = orders.find(x=>x.id==req.body.id);
 
-  let order = orders.find(o => o.id == id);
+  if(!o) return res.status(404).json({msg:"not found"});
 
-  if (!order) return res.status(404).json({ msg: "Not found" });
+  o.tracking = req.body.tracking;
 
-  order.tracking = tracking;
+  write(FILE,orders);
 
-  write(orders);
-
-  res.json(order);
+  res.json(o);
 });
 
-/* CUSTOMER TRACKING */
-app.get("/my-orders/:tx", (req, res) => {
-  let orders = read();
+/* CUSTOMER ORDERS */
+app.get("/my-orders/:phone",(req,res)=>{
+  let orders = read(FILE);
 
   res.json(
-    orders.filter(o => o.transactionId === req.params.tx)
+    orders.filter(o=>o.phone===req.params.phone)
   );
 });
 
-/* START */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Running"));
+app.listen(PORT,()=>console.log("running"));
