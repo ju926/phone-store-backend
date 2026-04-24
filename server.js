@@ -7,28 +7,22 @@ app.use(cors());
 app.use(express.json());
 
 /* FILES */
-const ORDERS_FILE = "./orders.json";
 const USERS_FILE = "./users.json";
+const ORDERS_FILE = "./orders.json";
 
-/* ================= SAFE FILE HANDLING ================= */
+/* ================= HELPERS ================= */
 
 function read(file){
   try{
     if(!fs.existsSync(file)) return [];
-    const data = fs.readFileSync(file);
-    return JSON.parse(data || "[]");
+    return JSON.parse(fs.readFileSync(file));
   }catch(e){
-    console.log("Read error:", e);
     return [];
   }
 }
 
 function write(file,data){
-  try{
-    fs.writeFileSync(file, JSON.stringify(data,null,2));
-  }catch(e){
-    console.log("Write error:", e);
-  }
+  fs.writeFileSync(file, JSON.stringify(data,null,2));
 }
 
 /* ================= HOME ================= */
@@ -44,23 +38,17 @@ app.post("/register",(req,res)=>{
 
   let users = read(USERS_FILE);
 
-  const { name, phone, password } = req.body;
+  const { name, phone, email, password } = req.body;
 
-  if(!name || !phone || !password){
+  if(!name || !password){
     return res.status(400).json({msg:"Missing fields"});
-  }
-
-  /* prevent duplicate */
-  let exists = users.find(u=>u.phone===phone);
-
-  if(exists){
-    return res.status(400).json({msg:"User exists"});
   }
 
   const user = {
     id: Date.now(),
     name,
-    phone,
+    phone: phone || "",
+    email: email || "",
     password
   };
 
@@ -75,14 +63,19 @@ app.post("/login",(req,res)=>{
 
   let users = read(USERS_FILE);
 
-  const { phone, password } = req.body;
+  const { phone, email, password } = req.body;
 
-  const user = users.find(
-    u => u.phone === phone && u.password === password
+  const user = users.find(u =>
+    (phone && u.phone === phone) ||
+    (email && u.email === email)
   );
 
   if(!user){
-    return res.status(401).json({msg:"Invalid login"});
+    return res.status(401).json({msg:"User not found"});
+  }
+
+  if(user.password !== password){
+    return res.status(401).json({msg:"Wrong password"});
   }
 
   res.json(user);
@@ -90,7 +83,7 @@ app.post("/login",(req,res)=>{
 
 /* ================= ORDERS ================= */
 
-/* GET ALL (ADMIN) */
+/* GET ALL ORDERS (ADMIN) */
 app.get("/orders",(req,res)=>{
   res.json(read(ORDERS_FILE));
 });
@@ -100,42 +93,23 @@ app.post("/order",(req,res)=>{
 
   let orders = read(ORDERS_FILE);
 
-  const {
-    userId,
-    name,
-    phone,
-    location,
-    method,
-    transactionId,
-    amount,
-    cart,
-    time
-  } = req.body;
-
-  if(!name || !phone || !location || !method || !transactionId){
-    return res.status(400).json({msg:"Missing order fields"});
-  }
-
   const order = {
     id: Date.now(),
 
-    /* USER */
-    userId,
-    name,
-    phone,
-    location,
+    userId: req.body.userId,
+    name: req.body.name,
+    phone: req.body.phone,
+    location: req.body.location,
 
-    /* PAYMENT */
-    method,
-    transactionId,
-    amount,
-    cart,
+    method: req.body.method,
+    transactionId: req.body.transactionId,
+    amount: req.body.amount,
+    cart: req.body.cart,
 
-    /* STATUS */
     status: "pending",
     tracking: "Order received",
 
-    time
+    time: req.body.time
   };
 
   orders.push(order);
@@ -154,18 +128,14 @@ app.post("/order-status",(req,res)=>{
   let index = orders.findIndex(o => o.id == id);
 
   if(index === -1){
-    return res.status(404).json({msg:"Order not found"});
+    return res.status(404).json({msg:"Not found"});
   }
 
-  /* ❌ DELETE REJECTED */
+  /* DELETE IF REJECTED */
   if(status === "rejected"){
     orders = orders.filter(o => o.id != id);
     write(ORDERS_FILE,orders);
-    return res.json({msg:"Order deleted"});
-  }
-
-  if(orders[index].status !== "pending"){
-    return res.status(400).json({msg:"Already processed"});
+    return res.json({msg:"Deleted"});
   }
 
   orders[index].status = status;
@@ -189,7 +159,7 @@ app.post("/tracking",(req,res)=>{
   let order = orders.find(o => o.id == id);
 
   if(!order){
-    return res.status(404).json({msg:"Order not found"});
+    return res.status(404).json({msg:"Not found"});
   }
 
   order.tracking = tracking;
@@ -199,19 +169,17 @@ app.post("/tracking",(req,res)=>{
   res.json(order);
 });
 
-/* CUSTOMER ORDERS (BY PHONE) */
+/* CUSTOMER ORDERS */
 app.get("/my-orders/:phone",(req,res)=>{
 
   let orders = read(ORDERS_FILE);
 
-  const result = orders.filter(
-    o => o.phone === req.params.phone
+  res.json(
+    orders.filter(o => o.phone === req.params.phone)
   );
-
-  res.json(result);
 });
 
-/* ================= START ================= */
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 3000;
 
