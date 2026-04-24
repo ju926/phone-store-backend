@@ -8,29 +8,38 @@ app.use(express.json());
 
 const FILE = "./orders.json";
 
-/* READ ORDERS */
+/* READ */
 function getOrders(){
   if(!fs.existsSync(FILE)) return [];
   return JSON.parse(fs.readFileSync(FILE));
 }
 
-/* SAVE ORDERS */
+/* SAVE */
 function saveOrders(data){
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
+/* HOME */
+app.get("/", (req,res)=>{
+  res.send("Backend running ✔");
+});
+
 /* GET ORDERS */
-app.get("/orders", (req,res)=>{
+app.get("/orders",(req,res)=>{
   res.json(getOrders());
 });
 
 /* CREATE ORDER */
-app.post("/order", (req,res)=>{
+app.post("/order",(req,res)=>{
   let orders = getOrders();
 
   const order = {
     id: Date.now(),
-    ...req.body,
+    method: req.body.method,
+    transactionId: req.body.transactionId,
+    amount: req.body.amount,
+    cart: req.body.cart,
+    time: req.body.time,
     status: "pending"
   };
 
@@ -40,8 +49,8 @@ app.post("/order", (req,res)=>{
   res.json(order);
 });
 
-/* 🔥 APPROVE / REJECT */
-app.post("/order-status", (req,res)=>{
+/* UPDATE STATUS */
+app.post("/order-status",(req,res)=>{
   let orders = getOrders();
 
   const { id, status } = req.body;
@@ -49,4 +58,18 @@ app.post("/order-status", (req,res)=>{
   const index = orders.findIndex(o => o.id == id);
 
   if(index === -1){
-    return res.status(404
+    return res.status(404).json({message:"Order not found"});
+  }
+
+  if(orders[index].status !== "pending"){
+    return res.status(400).json({message:"Already processed"});
+  }
+
+  orders[index].status = status;
+  saveOrders(orders);
+
+  res.json({message:"Updated"});
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, ()=> console.log("Server running"));
