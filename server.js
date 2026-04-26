@@ -5,24 +5,24 @@ const nodemailer = require("nodemailer");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" })); // IMPORTANT for images
+app.use(express.json({ limit: "10mb" }));
 
 /* =========================
-   IN-MEMORY DATABASE
+   DATABASE (TEMP MEMORY)
 ========================= */
 
 let products = [];
 let orders = [];
 
 /* =========================
-   EMAIL SETUP (GMAIL)
+   EMAIL SETUP
 ========================= */
 
 const transporter = nodemailer.createTransport({
 service: "gmail",
 auth: {
 user: "buanakwenda@gmail.com",
-pass: "ydzw pgya mkqs okwe"
+pass: "YOUR_APP_PASSWORD"
 }
 });
 
@@ -30,12 +30,12 @@ pass: "ydzw pgya mkqs okwe"
    PRODUCTS API
 ========================= */
 
-/* GET PRODUCTS */
+/* GET ALL PRODUCTS */
 app.get("/products", (req, res) => {
 res.json(products);
 });
 
-/* ADD PRODUCT (ADMIN MULTI UPLOAD SUPPORT) */
+/* ADD PRODUCT */
 app.post("/add-product", (req, res) => {
 
 const product = {
@@ -48,13 +48,13 @@ image: req.body.image
 products.push(product);
 
 res.json({
-message: "Product added successfully",
+message: "Product added",
 product
 });
 
 });
 
-/* UPDATE PRODUCT (ADMIN EDIT) */
+/* UPDATE PRODUCT */
 app.put("/update-product/:id", (req, res) => {
 
 let product = products.find(p => p.id == req.params.id);
@@ -68,26 +68,26 @@ product.price = req.body.price;
 product.image = req.body.image;
 
 res.json({
-message: "Product updated successfully",
+message: "Product updated",
 product
 });
 
 });
 
-/* DELETE PRODUCT (ADMIN) */
+/* DELETE PRODUCT */
 app.delete("/delete-product/:id", (req, res) => {
 
 products = products.filter(p => p.id != req.params.id);
 
-res.json({ message: "Product deleted successfully" });
+res.json({ message: "Product deleted" });
 
 });
 
 /* =========================
-   ORDER SYSTEM + EMAIL
+   ORDER + EMAIL SYSTEM
 ========================= */
 
-app.post("/order", (req, res) => {
+app.post("/order", async (req, res) => {
 
 const order = {
 id: Date.now(),
@@ -101,13 +101,13 @@ status: "pending"
 
 orders.push(order);
 
-/* EMAIL CONTENT */
+/* CUSTOMER EMAIL */
 const mailOptions = {
 from: "Malone Store <buanakwenda@gmail.com>",
 to: req.body.email,
-subject: "🛒 Order Confirmation - Malone Store",
+subject: "🛒 Order Confirmation",
 html: `
-<h2>🎉 Order Received Successfully</h2>
+<h2>🎉 Order Confirmed</h2>
 
 <p><b>Name:</b> ${req.body.name}</p>
 <p><b>Phone:</b> ${req.body.phone}</p>
@@ -118,28 +118,26 @@ html: `
 <p>We will contact you soon for delivery 🚚</p>
 
 <hr>
-<p>Thank you for shopping with Malone Store ❤️</p>
+<p>Thank you for shopping with us ❤️</p>
 `
 };
 
-/* SEND EMAIL */
-transporter.sendMail(mailOptions, (err, info) => {
-if (err) {
-console.log("Email error:", err);
-} else {
-console.log("Email sent:", info.response);
+try {
+await transporter.sendMail(mailOptions);
+console.log("Email sent ✔");
+} catch (err) {
+console.log("Email error ❌", err);
 }
-});
 
 res.json({
-message: "Order placed successfully",
+message: "Order placed",
 order
 });
 
 });
 
 /* =========================
-   GET ORDERS (ADMIN)
+   GET ORDERS (OPTIONAL ADMIN)
 ========================= */
 
 app.get("/orders", (req, res) => {
@@ -147,7 +145,7 @@ res.json(orders);
 });
 
 /* =========================
-   SERVER START
+   START SERVER
 ========================= */
 
 const PORT = process.env.PORT || 10000;
