@@ -5,53 +5,56 @@ const nodemailer = require("nodemailer");
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" })); // IMPORTANT for image uploads
 
-/* =======================
+/* =========================
    DATABASE (TEMP MEMORY)
-======================= */
+========================= */
 
 let products = [];
 let orders = [];
 
-/* =======================
-   EMAIL CONFIG (GMAIL)
-======================= */
+/* =========================
+   EMAIL SETUP
+========================= */
 
 const transporter = nodemailer.createTransport({
 service: "gmail",
 auth: {
 user: "buanakwenda@gmail.com",
-pass: "ydzw pgya mkqs okwe"
+pass: "YOUR_APP_PASSWORD"
 }
 });
 
-/* =======================
-   PRODUCTS ROUTES
-======================= */
+/* =========================
+   PRODUCTS API
+========================= */
 
-// Get products
+// Get all products
 app.get("/products", (req, res) => {
 res.json(products);
 });
 
-// Add product (ADMIN)
+// Add product (ADMIN MULTI UPLOAD SUPPORT)
 app.post("/add-product", (req, res) => {
 
 const product = {
 id: Date.now(),
 name: req.body.name,
 price: req.body.price,
-image: req.body.image
+image: req.body.image // base64 image from admin
 };
 
 products.push(product);
 
-res.json({ message: "Product added", product });
+res.json({
+message: "Product added successfully",
+product
+});
 
 });
 
-// Delete product (ADMIN)
+// Delete product (optional admin feature)
 app.delete("/delete-product/:id", (req, res) => {
 
 products = products.filter(p => p.id != req.params.id);
@@ -60,9 +63,9 @@ res.json({ message: "Product deleted" });
 
 });
 
-/* =======================
-   ORDER + EMAIL
-======================= */
+/* =========================
+   ORDER SYSTEM + EMAIL
+========================= */
 
 app.post("/order", (req, res) => {
 
@@ -84,7 +87,7 @@ from: "Malone Store <buanakwenda@gmail.com>",
 to: req.body.email,
 subject: "🛒 Order Confirmation - Malone Store",
 html: `
-<h2>🎉 Order Received Successfully</h2>
+<h2>🎉 Thank you for your order</h2>
 
 <p><b>Name:</b> ${req.body.name}</p>
 <p><b>Phone:</b> ${req.body.phone}</p>
@@ -92,7 +95,7 @@ html: `
 
 <h3>Status: Pending</h3>
 
-<p>We will contact you soon for delivery 🚚</p>
+<p>We will contact you for delivery 🚚</p>
 
 <hr>
 <p>Thank you for shopping with Malone Store ❤️</p>
@@ -108,21 +111,24 @@ console.log("Email sent:", info.response);
 }
 });
 
-res.json(order);
+res.json({
+message: "Order placed successfully",
+order
+});
 
 });
 
-/* =======================
+/* =========================
    GET ORDERS (ADMIN)
-======================= */
+========================= */
 
 app.get("/orders", (req, res) => {
 res.json(orders);
 });
 
-/* =======================
+/* =========================
    SERVER START
-======================= */
+========================= */
 
 const PORT = process.env.PORT || 10000;
 
