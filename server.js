@@ -5,24 +5,24 @@ const nodemailer = require("nodemailer");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" })); // IMPORTANT for image uploads
+app.use(express.json({ limit: "10mb" })); // IMPORTANT for images
 
 /* =========================
-   DATABASE (TEMP MEMORY)
+   IN-MEMORY DATABASE
 ========================= */
 
 let products = [];
 let orders = [];
 
 /* =========================
-   EMAIL SETUP
+   EMAIL SETUP (GMAIL)
 ========================= */
 
 const transporter = nodemailer.createTransport({
 service: "gmail",
 auth: {
 user: "buanakwenda@gmail.com",
-pass: "YOUR_APP_PASSWORD"
+pass: "ydzw pgya mkqs okwe"
 }
 });
 
@@ -30,19 +30,19 @@ pass: "YOUR_APP_PASSWORD"
    PRODUCTS API
 ========================= */
 
-// Get all products
+/* GET PRODUCTS */
 app.get("/products", (req, res) => {
 res.json(products);
 });
 
-// Add product (ADMIN MULTI UPLOAD SUPPORT)
+/* ADD PRODUCT (ADMIN MULTI UPLOAD SUPPORT) */
 app.post("/add-product", (req, res) => {
 
 const product = {
 id: Date.now(),
 name: req.body.name,
 price: req.body.price,
-image: req.body.image // base64 image from admin
+image: req.body.image
 };
 
 products.push(product);
@@ -54,12 +54,32 @@ product
 
 });
 
-// Delete product (optional admin feature)
+/* UPDATE PRODUCT (ADMIN EDIT) */
+app.put("/update-product/:id", (req, res) => {
+
+let product = products.find(p => p.id == req.params.id);
+
+if (!product) {
+return res.status(404).json({ message: "Product not found" });
+}
+
+product.name = req.body.name;
+product.price = req.body.price;
+product.image = req.body.image;
+
+res.json({
+message: "Product updated successfully",
+product
+});
+
+});
+
+/* DELETE PRODUCT (ADMIN) */
 app.delete("/delete-product/:id", (req, res) => {
 
 products = products.filter(p => p.id != req.params.id);
 
-res.json({ message: "Product deleted" });
+res.json({ message: "Product deleted successfully" });
 
 });
 
@@ -87,7 +107,7 @@ from: "Malone Store <buanakwenda@gmail.com>",
 to: req.body.email,
 subject: "🛒 Order Confirmation - Malone Store",
 html: `
-<h2>🎉 Thank you for your order</h2>
+<h2>🎉 Order Received Successfully</h2>
 
 <p><b>Name:</b> ${req.body.name}</p>
 <p><b>Phone:</b> ${req.body.phone}</p>
@@ -95,7 +115,7 @@ html: `
 
 <h3>Status: Pending</h3>
 
-<p>We will contact you for delivery 🚚</p>
+<p>We will contact you soon for delivery 🚚</p>
 
 <hr>
 <p>Thank you for shopping with Malone Store ❤️</p>
