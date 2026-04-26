@@ -5,76 +5,76 @@ const fs = require("fs");
 
 const app = express();
 
-/* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 
-/* ================= CREATE UPLOADS FOLDER ================= */
+/* ================= UPLOADS ================= */
 if (!fs.existsSync("uploads")) {
   fs.mkdirSync("uploads");
 }
 
 app.use("/uploads", express.static("uploads"));
 
-/* ================= MEMORY DATABASE ================= */
+/* ================= DATABASE ================= */
 let products = [];
 let orders = [];
 
-/* ================= MULTER CONFIG ================= */
+/* ================= MULTER ================= */
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  }
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + file.originalname)
 });
 
 const upload = multer({ storage });
 
 /* ================= PRODUCTS ================= */
 
-// GET PRODUCTS
 app.get("/products", (req, res) => {
   res.json(products);
 });
 
-// ADD PRODUCT
 app.post("/add-product", upload.single("image"), (req, res) => {
-
-  if (!req.file) {
-    return res.status(400).json({ error: "No image uploaded" });
-  }
 
   let product = {
     id: Date.now(),
     name: req.body.name,
     price: req.body.price,
-    image: `/uploads/${req.file.filename}`
+
+    // ✅ FIXED IMAGE PATH (IMPORTANT)
+    image: `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
   };
 
   products.push(product);
 
-  res.json({
-    message: "Product added",
-    product
-  });
+  res.json(product);
 });
 
-// DELETE PRODUCT
+/* DELETE PRODUCT */
 app.post("/delete-product", (req, res) => {
   products = products.filter(p => p.id !== req.body.id);
-  res.json({ message: "Deleted" });
+  res.json({ message: "deleted" });
+});
+
+/* EDIT PRODUCT */
+app.post("/edit-product", (req, res) => {
+
+  let product = products.find(p => p.id === req.body.id);
+
+  if (product) {
+    product.name = req.body.name;
+    product.price = req.body.price;
+  }
+
+  res.json(product);
 });
 
 /* ================= ORDERS ================= */
 
-// GET ORDERS
 app.get("/orders", (req, res) => {
   res.json(orders);
 });
 
-// CREATE ORDER
 app.post("/order", (req, res) => {
 
   let order = {
@@ -89,34 +89,23 @@ app.post("/order", (req, res) => {
 
   orders.push(order);
 
-  res.json({
-    message: "Order created",
-    order
-  });
+  res.json(order);
 });
 
-// UPDATE ORDER STATUS
 app.post("/order-status", (req, res) => {
 
   let order = orders.find(o => o.id === req.body.id);
+  if (order) order.status = req.body.status;
 
-  if (order) {
-    order.status = req.body.status;
-  }
-
-  res.json({ message: "Status updated" });
+  res.json(order);
 });
 
-// UPDATE TRACKING
 app.post("/tracking", (req, res) => {
 
   let order = orders.find(o => o.id === req.body.id);
+  if (order) order.tracking = req.body.tracking;
 
-  if (order) {
-    order.tracking = req.body.tracking;
-  }
-
-  res.json({ message: "Tracking updated" });
+  res.json(order);
 });
 
 /* ================= SERVER ================= */
@@ -124,5 +113,5 @@ app.post("/tracking", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("Server running on", PORT);
 });
