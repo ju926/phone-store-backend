@@ -1,188 +1,112 @@
-import express from "express";
-import cors from "cors";
-import fs from "fs";
-
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
 const app = express();
+
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
 
-/* FILES */
-const USERS_FILE = "./users.json";
-const ORDERS_FILE = "./orders.json";
+/* ================= STORAGE ================= */
 
-/* ================= HELPERS ================= */
+let products = [];
+let orders = [];
 
-function read(file){
-  try{
-    if(!fs.existsSync(file)) return [];
-    return JSON.parse(fs.readFileSync(file));
-  }catch(e){
-    return [];
-  }
+/* ================= IMAGE UPLOAD ================= */
+
+const storage = multer.diskStorage({
+destination:"uploads/",
+filename:(req,file,cb)=>{
+cb(null, Date.now()+"-"+file.originalname);
 }
-
-function write(file,data){
-  fs.writeFileSync(file, JSON.stringify(data,null,2));
-}
-
-/* ================= HOME ================= */
-
-app.get("/",(req,res)=>{
-  res.send("Backend Running ✔");
 });
 
-/* ================= USERS ================= */
+const upload = multer({storage});
 
-/* REGISTER */
-app.post("/register",(req,res)=>{
+/* ================= PRODUCTS ================= */
 
-  let users = read(USERS_FILE);
-
-  const { name, phone, email, password } = req.body;
-
-  if(!name || !password){
-    return res.status(400).json({msg:"Missing fields"});
-  }
-
-  const user = {
-    id: Date.now(),
-    name,
-    phone: phone || "",
-    email: email || "",
-    password
-  };
-
-  users.push(user);
-  write(USERS_FILE,users);
-
-  res.json(user);
+// GET PRODUCTS
+app.get("/products",(req,res)=>{
+res.json(products);
 });
 
-/* LOGIN */
-app.post("/login",(req,res)=>{
+// ADD PRODUCT (WITH IMAGE)
+app.post("/add-product", upload.single("image"), (req,res)=>{
 
-  let users = read(USERS_FILE);
+let product = {
+id: Date.now(),
+name: req.body.name,
+price: req.body.price,
+image: req.file ? "/uploads/"+req.file.filename : ""
+};
 
-  const { phone, email, password } = req.body;
+products.push(product);
 
-  const user = users.find(u =>
-    (phone && u.phone === phone) ||
-    (email && u.email === email)
-  );
+res.json(product);
 
-  if(!user){
-    return res.status(401).json({msg:"User not found"});
-  }
+});
 
-  if(user.password !== password){
-    return res.status(401).json({msg:"Wrong password"});
-  }
-
-  res.json(user);
+// DELETE PRODUCT
+app.post("/delete-product",(req,res)=>{
+products = products.filter(p=>p.id !== req.body.id);
+res.json({success:true});
 });
 
 /* ================= ORDERS ================= */
 
-/* GET ALL ORDERS (ADMIN) */
+// GET ORDERS
 app.get("/orders",(req,res)=>{
-  res.json(read(ORDERS_FILE));
+res.json(orders);
 });
 
-/* CREATE ORDER */
+// CREATE ORDER
 app.post("/order",(req,res)=>{
 
-  let orders = read(ORDERS_FILE);
+let order = {
+id: Date.now(),
+name: req.body.name,
+phone: req.body.phone,
+amount: req.body.amount,
+cart: req.body.cart,
+status: "pending",
+tracking: "Order placed",
+location: req.body.location
+};
 
-  const order = {
-    id: Date.now(),
+orders.push(order);
 
-    userId: req.body.userId,
-    name: req.body.name,
-    phone: req.body.phone,
-    location: req.body.location,
+res.json(order);
 
-    method: req.body.method,
-    transactionId: req.body.transactionId,
-    amount: req.body.amount,
-    cart: req.body.cart,
-
-    status: "pending",
-    tracking: "Order received",
-
-    time: req.body.time
-  };
-
-  orders.push(order);
-  write(ORDERS_FILE,orders);
-
-  res.json(order);
 });
 
-/* APPROVE / REJECT */
+// UPDATE STATUS (approve/reject)
 app.post("/order-status",(req,res)=>{
 
-  let orders = read(ORDERS_FILE);
+let order = orders.find(o=>o.id === req.body.id);
 
-  const { id, status } = req.body;
+if(order){
+order.status = req.body.status;
+}
 
-  let index = orders.findIndex(o => o.id == id);
+res.json(order);
 
-  if(index === -1){
-    return res.status(404).json({msg:"Not found"});
-  }
-
-  /* DELETE IF REJECTED */
-  if(status === "rejected"){
-    orders = orders.filter(o => o.id != id);
-    write(ORDERS_FILE,orders);
-    return res.json({msg:"Deleted"});
-  }
-
-  orders[index].status = status;
-
-  if(status === "approved"){
-    orders[index].tracking = "Payment confirmed";
-  }
-
-  write(ORDERS_FILE,orders);
-
-  res.json(orders[index]);
 });
 
-/* UPDATE TRACKING */
+// UPDATE TRACKING
 app.post("/tracking",(req,res)=>{
 
-  let orders = read(ORDERS_FILE);
+let order = orders.find(o=>o.id === req.body.id);
 
-  const { id, tracking } = req.body;
+if(order){
+order.tracking = req.body.tracking;
+}
 
-  let order = orders.find(o => o.id == id);
+res.json(order);
 
-  if(!order){
-    return res.status(404).json({msg:"Not found"});
-  }
-
-  order.tracking = tracking;
-
-  write(ORDERS_FILE,orders);
-
-  res.json(order);
 });
 
-/* CUSTOMER ORDERS */
-app.get("/my-orders/:phone",(req,res)=>{
+/* ================= SERVER ================= */
 
-  let orders = read(ORDERS_FILE);
-
-  res.json(
-    orders.filter(o => o.phone === req.params.phone)
-  );
-});
-
-/* ================= START SERVER ================= */
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT,()=>{
-  console.log("Server running on port", PORT);
+app.listen(3000,()=>{
+console.log("Server running on port 3000");
 });
