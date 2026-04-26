@@ -1,117 +1,71 @@
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
-const fs = require("fs");
+const nodemailer = require("nodemailer");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-/* ================= UPLOADS ================= */
-if (!fs.existsSync("uploads")) {
-  fs.mkdirSync("uploads");
-}
-
-app.use("/uploads", express.static("uploads"));
-
-/* ================= DATABASE ================= */
-let products = [];
 let orders = [];
+let products = [];
 
-/* ================= MULTER ================= */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) =>
-    cb(null, Date.now() + "-" + file.originalname)
+/* EMAIL SETUP */
+const transporter = nodemailer.createTransport({
+service: "gmail",
+auth: {
+user: "buanakwenda@gmail.com",
+pass: "YOUR_NEW_APP_PASSWORD"
+}
 });
 
-const upload = multer({ storage });
-
-/* ================= PRODUCTS ================= */
-
+/* PRODUCTS */
 app.get("/products", (req, res) => {
-  res.json(products);
+res.json(products);
 });
 
-app.post("/add-product", upload.single("image"), (req, res) => {
-
-  let product = {
-    id: Date.now(),
-    name: req.body.name,
-    price: req.body.price,
-
-    // ✅ FIXED IMAGE PATH (IMPORTANT)
-    image: `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
-  };
-
-  products.push(product);
-
-  res.json(product);
-});
-
-/* DELETE PRODUCT */
-app.post("/delete-product", (req, res) => {
-  products = products.filter(p => p.id !== req.body.id);
-  res.json({ message: "deleted" });
-});
-
-/* EDIT PRODUCT */
-app.post("/edit-product", (req, res) => {
-
-  let product = products.find(p => p.id === req.body.id);
-
-  if (product) {
-    product.name = req.body.name;
-    product.price = req.body.price;
-  }
-
-  res.json(product);
-});
-
-/* ================= ORDERS ================= */
-
-app.get("/orders", (req, res) => {
-  res.json(orders);
-});
-
+/* ADD ORDER + EMAIL */
 app.post("/order", (req, res) => {
 
-  let order = {
-    id: Date.now(),
-    name: req.body.name,
-    phone: req.body.phone,
-    amount: req.body.amount,
-    cart: req.body.cart,
-    status: "pending",
-    tracking: "Order placed"
-  };
+const order = {
+id: Date.now(),
+name: req.body.name,
+phone: req.body.phone,
+email: req.body.email,
+amount: req.body.amount,
+cart: req.body.cart,
+status: "pending"
+};
 
-  orders.push(order);
+orders.push(order);
 
-  res.json(order);
+/* EMAIL */
+const mailOptions = {
+from: "Malone Store <buanakwenda@gmail.com>",
+to: req.body.email,
+subject: "🛒 Order Confirmation - Malone Store",
+html: `
+<h2>🎉 Order Received</h2>
+<p><b>Name:</b> ${req.body.name}</p>
+<p><b>Phone:</b> ${req.body.phone}</p>
+<p><b>Total:</b> ${req.body.amount} KES</p>
+<p>Status: Pending</p>
+<hr>
+<p>We will contact you soon 🚚</p>
+`
+};
+
+transporter.sendMail(mailOptions, (err, info) => {
+if (err) {
+console.log("Email error:", err);
+} else {
+console.log("Email sent:", info.response);
+}
 });
 
-app.post("/order-status", (req, res) => {
+res.json(order);
 
-  let order = orders.find(o => o.id === req.body.id);
-  if (order) order.status = req.body.status;
-
-  res.json(order);
 });
 
-app.post("/tracking", (req, res) => {
-
-  let order = orders.find(o => o.id === req.body.id);
-  if (order) order.tracking = req.body.tracking;
-
-  res.json(order);
-});
-
-/* ================= SERVER ================= */
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("Server running on", PORT);
+app.listen(10000, () => {
+console.log("Server running on port 10000");
 });
