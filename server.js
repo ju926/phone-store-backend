@@ -3,8 +3,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+const fs = require("fs");
 
 const app = express();
 
@@ -13,132 +12,99 @@ const app = express();
 ========================= */
 app.use(cors());
 app.use(express.json());
+
+// IMPORTANT: serve uploaded images
 app.use("/uploads", express.static("uploads"));
 
 /* =========================
-   DATABASE CONNECTION
+   CREATE UPLOADS FOLDER (IMPORTANT FOR RENDER)
+========================= */
+if (!fs.existsSync("uploads")) {
+fs.mkdirSync("uploads");
+}
+
+/* =========================
+   MONGODB CONNECT
 ========================= */
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
-.then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("DB Error:", err));
+.then(() => console.log("MongoDB Connected ✔"))
+.catch(err => console.log("DB Error:", err));
 
 /* =========================
-   MODELS
+   PRODUCT MODEL
 ========================= */
-const Product = mongoose.model("Product",{
-name:String,
-price:Number,
-image:String
-});
-
-const User = mongoose.model("User",{
-name:String,
-email:{type:String,unique:true},
-password:String
+const Product = mongoose.model("Product", {
+name: String,
+price: Number,
+image: String
 });
 
 /* =========================
-   FILE UPLOAD (MULTER)
+   MULTER CONFIG (IMAGE UPLOAD)
 ========================= */
 const storage = multer.diskStorage({
-destination:(req,file,cb)=>{
-cb(null,"uploads/");
+destination: (req, file, cb) => {
+cb(null, "uploads/");
 },
-filename:(req,file,cb)=>{
+filename: (req, file, cb) => {
 cb(null, Date.now() + path.extname(file.originalname));
 }
 });
 
-const upload = multer({
-storage,
-limits:{fileSize:5 * 1024 * 1024} // 5MB limit
+const upload = multer({ storage });
+
+/* =========================
+   TEST ROUTE
+========================= */
+app.get("/", (req, res) => {
+res.send("API Running ✔");
 });
 
 /* =========================
-   PRODUCTS API
+   GET PRODUCTS
 ========================= */
-
-// GET PRODUCTS
-app.get("/products", async (req,res)=>{
+app.get("/products", async (req, res) => {
 const products = await Product.find();
 res.json(products);
 });
 
-// ADD PRODUCT
-app.post("/add-product-upload", upload.single("image"), async (req,res)=>{
+/* =========================
+   ADD PRODUCT (FIXED UPLOAD)
+========================= */
+app.post("/add-product-upload", upload.single("image"), async (req, res) => {
 
-try{
+try {
+
+console.log("BODY:", req.body);
+console.log("FILE:", req.file);
+
+if (!req.file) {
+return res.status(400).json({ message: "No image uploaded" });
+}
 
 const product = new Product({
-name:req.body.name,
-price:req.body.price,
-image:req.file ? req.file.filename : ""
+name: req.body.name,
+price: req.body.price,
+image: req.file.filename
 });
 
 await product.save();
 
 res.json(product);
 
-}catch(err){
-res.status(500).json({message:"Upload failed"});
+} catch (err) {
+console.log(err);
+res.status(500).json({ message: "Server error" });
 }
 
-});
-
-// DELETE PRODUCT
-app.delete("/delete-product/:id", async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted"});
 });
 
 /* =========================
-   AUTH SYSTEM
+   DELETE PRODUCT
 ========================= */
-
-const JWT_SECRET = "secret123";
-
-/* SIGNUP */
-app.post("/signup", async (req,res)=>{
-
-try{
-
-const hash = await bcrypt.hash(req.body.password,10);
-
-const user = new User({
-name:req.body.name,
-email:req.body.email,
-password:hash
-});
-
-await user.save();
-
-res.json({message:"User created ✔"});
-
-}catch(err){
-res.status(400).json({message:"User already exists"});
-}
-
-});
-
-/* LOGIN */
-app.post("/login", async (req,res)=>{
-
-const user = await User.findOne({email:req.body.email});
-
-if(!user){
-return res.json({message:"User not found"});
-}
-
-const match = await bcrypt.compare(req.body.password,user.password);
-
-if(!match){
-return res.json({message:"Wrong password"});
-}
-
-const token = jwt.sign({id:user._id},JWT_SECRET);
-
-res.json({token,user});
-
+app.delete("/delete-product/:id", async (req, res) => {
+await Product.findByIdAndDelete(req.params.id);
+res.json({ message: "Deleted ✔" });
 });
 
 /* =========================
@@ -146,6 +112,6 @@ res.json({token,user});
 ========================= */
 const PORT = process.env.PORT || 10000;
 
-app.listen(PORT,()=>{
+app.listen(PORT, () => {
 console.log("Server running on port " + PORT);
 });
