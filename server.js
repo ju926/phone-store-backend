@@ -15,7 +15,7 @@ app.use("/uploads", express.static("uploads"));
 
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("Mongo Error:",err));
+.catch(err=>console.log(err));
 
 /* ================= IMAGE UPLOAD ================= */
 
@@ -48,7 +48,7 @@ status:{type:String,default:"Pending"},
 date:{type:Date,default:Date.now}
 });
 
-/* ================= EMAIL SETUP ================= */
+/* ================= EMAIL ================= */
 
 const transporter = nodemailer.createTransport({
 service:"gmail",
@@ -79,16 +79,16 @@ await product.save();
 res.json({message:"Product added ✔"});
 });
 
-app.delete("/product/:id", async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted"});
-});
-
 app.put("/product/:id", async (req,res)=>{
 const p = await Product.findById(req.params.id);
 p.price = req.body.price;
 await p.save();
-res.json({message:"Updated"});
+res.json({message:"Updated ✔"});
+});
+
+app.delete("/product/:id", async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
 });
 
 /* ================= ORDERS ================= */
@@ -99,21 +99,10 @@ res.json(await Order.find().sort({date:-1}));
 
 app.post("/order", async (req,res)=>{
 
-try{
-
-const order = new Order({
-fullName:req.body.fullName,
-phone:req.body.phone,
-email:req.body.email,
-location:req.body.location,
-items:req.body.items,
-total:req.body.total,
-deliveryDate:req.body.deliveryDate
-});
-
+const order = new Order(req.body);
 await order.save();
 
-/* ================= EMAIL INVOICE ================= */
+/* ================= INITIAL EMAIL ================= */
 
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
@@ -121,55 +110,28 @@ to:order.email,
 subject:`🧾 Invoice #${order._id}`,
 
 html:`
-<div style="font-family:Arial;background:#f4f4f4;padding:20px">
+<div style="font-family:Arial;padding:20px">
 
-<div style="max-width:600px;margin:auto;background:white;padding:20px;border-radius:10px">
+<h2>🧾 ORDER INVOICE</h2>
 
-<h2 style="text-align:center;color:#2563eb;">🧾 ORDER INVOICE</h2>
-
-<p><b>Invoice ID:</b> ${order._id}</p>
 <p><b>Name:</b> ${order.fullName}</p>
 <p><b>Phone:</b> ${order.phone}</p>
 <p><b>Location:</b> ${order.location}</p>
 
 <hr>
 
-<h3>🛒 Product</h3>
-
-<div style="display:flex;gap:10px;border:1px solid #ddd;padding:10px;border-radius:10px">
+<h3>📦 Product</h3>
 
 <img src="${baseUrl}/uploads/${order.items[0].image}"
-style="width:100px;height:100px;object-fit:contain;border-radius:10px">
+style="width:120px;height:120px;object-fit:contain">
 
-<div>
 <p><b>${order.items[0].name}</b></p>
 <p>KES ${order.items[0].price}</p>
-</div>
-
-</div>
 
 <hr>
 
-<h3>💰 Summary</h3>
-
-<p>Subtotal: KES ${order.total}</p>
-<p><b>Total: KES ${order.total}</b></p>
-
-<hr>
-
-<p style="color:green;">
-🚚 Delivery Date: <b>${order.deliveryDate}</b>
-</p>
-
-<p>Status: <b>${order.status}</b></p>
-
-<hr>
-
-<p style="text-align:center;color:gray;font-size:12px">
-Thank you for shopping with us 🙏
-</p>
-
-</div>
+<p><b>Total:</b> KES ${order.total}</p>
+<p>🚚 Delivery: ${order.deliveryDate}</p>
 
 </div>
 `
@@ -177,29 +139,70 @@ Thank you for shopping with us 🙏
 
 res.json({message:"Order placed ✔"});
 
-}catch(err){
-console.log("ORDER ERROR:",err.message);
-res.status(500).json({message:"Error"});
-}
-
 });
 
-/* ================= STATUS UPDATE ================= */
+/* ================= STATUS UPDATE + EMAIL ================= */
 
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
+
+if(!order) return res.status(404).json({message:"Not found"});
+
 order.status = req.body.status;
 await order.save();
 
+let message = "";
+
+if(order.status === "Processing"){
+message = "Your order is being prepared 🚚";
+}
+
+if(order.status === "Delivered"){
+message = "Your order has been delivered 🎉";
+}
+
+/* SEND EMAIL ONLY FOR IMPORTANT STATUS */
+if(order.status === "Processing" || order.status === "Delivered"){
+
+await transporter.sendMail({
+from:"Store <YOUR_GMAIL@gmail.com>",
+to:order.email,
+subject:`📦 Order Update: ${order.status}`,
+
+html:`
+<div style="font-family:Arial;padding:20px">
+
+<h2>📦 Order Update</h2>
+
+<p>Hi ${order.fullName},</p>
+
+<p><b>Status:</b> ${order.status}</p>
+
+<p style="color:green">${message}</p>
+
+<hr>
+
+<p><b>Item:</b> ${order.items[0].name}</p>
+<p><b>Total:</b> KES ${order.total}</p>
+
+<p>🚚 Delivery Date: ${order.deliveryDate}</p>
+
+</div>
+`
+});
+
+}
+
 res.json({message:"Status updated ✔"});
+
 });
 
 /* ================= DELETE ORDER ================= */
 
 app.delete("/order/:id", async (req,res)=>{
 await Order.findByIdAndDelete(req.params.id);
-res.json({message:"Order deleted"});
+res.json({message:"Deleted ✔"});
 });
 
 /* ================= SERVER ================= */
