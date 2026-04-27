@@ -8,41 +8,49 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= DATABASE ================= */
-mongoose.connect("mongodb+srv://storeUser:storePass123@store.eggjy60.mongodb.net/store?retryWrites=true&w=majority")
-.then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("MongoDB Error:", err.message));
+/* ================= MONGO DB ================= */
+const MONGO_URL = "mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store?retryWrites=true&w=majority";
+
+mongoose.connect(MONGO_URL)
+.then(() => console.log("MongoDB Connected ✔"))
+.catch(err => console.log("MongoDB Error:", err.message));
 
 /* ================= MODELS ================= */
-const Product = mongoose.model("Product",{
-name:String,
-price:Number,
-image:String
+const Product = mongoose.model("Product", {
+name: String,
+price: Number,
+image: String
 });
 
-const Order = mongoose.model("Order",{
-fullName:String,
-phone:String,
-email:String,
-location:String,
-items:Array,
-status:{type:String,default:"Pending"},
-date:{type:Date,default:Date.now}
+const Order = mongoose.model("Order", {
+fullName: String,
+phone: String,
+email: String,
+location: String,
+items: Array,
+status: { type: String, default: "Pending" },
+date: { type: Date, default: Date.now }
 });
 
-/* ================= EMAIL ================= */
+/* ================= EMAIL SETUP ================= */
 const transporter = nodemailer.createTransport({
-service:"gmail",
-auth:{
-user:"YOUR_GMAIL@gmail.com",
-pass:"YOUR_16_DIGIT_APP_PASSWORD"
+service: "gmail",
+auth: {
+user: "okola5775@gmail.com",
+pass: "jzui tqah ngvi vmgc"
 }
+});
+
+/* ================= TEST ROUTE ================= */
+app.get("/", (req,res)=>{
+res.send("Server running ✔");
 });
 
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
 try{
-res.json(await Product.find());
+const data = await Product.find();
+res.json(data);
 }catch(err){
 res.status(500).json([]);
 }
@@ -51,7 +59,8 @@ res.status(500).json([]);
 /* ================= ORDERS ================= */
 app.get("/orders", async (req,res)=>{
 try{
-res.json(await Order.find().sort({date:-1}));
+const orders = await Order.find().sort({date:-1});
+res.json(orders);
 }catch(err){
 res.status(500).json([]);
 }
@@ -79,19 +88,19 @@ status: "Pending"
 
 await order.save();
 
-/* ================= EMAIL TO BUYER ================= */
+/* EMAIL TO BUYER */
 if(order.email){
 
 await transporter.sendMail({
-from:"Malone Store <YOUR_GMAIL@gmail.com>",
-to:order.email,
-subject:"🛒 Order Confirmation",
-html:`
+from: "Store <YOUR_GMAIL@gmail.com>",
+to: order.email,
+subject: "🛒 Order Confirmation",
+html: `
 <h2>Hi ${order.fullName}</h2>
 
 <p>Your order has been received ✔</p>
 
-<p><b>Status:</b> ${order.status}</p>
+<p><b>Status:</b> Pending</p>
 
 <h3>Items:</h3>
 <ul>
@@ -101,27 +110,22 @@ ${items.map(i=>`
 </ul>
 
 <p>We will update you soon 📦</p>
-<hr>
-<p>Malone Phone Store</p>
 `
 });
 
-console.log("Email sent to buyer ✔");
+console.log("Email sent ✔");
 }
 
-res.json({
-message:"Order placed successfully ✔",
-orderId: order._id
-});
+res.json({ message: "Order placed ✔", orderId: order._id });
 
 }catch(err){
 console.log("ORDER ERROR:", err.message);
-res.status(500).json({message:"Order failed"});
+res.status(500).json({ message: "Order failed" });
 }
 
 });
 
-/* ================= UPDATE STATUS + EMAIL ================= */
+/* ================= UPDATE STATUS ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
 
 try{
@@ -133,29 +137,29 @@ await order.save();
 
 /* EMAIL UPDATE */
 await transporter.sendMail({
-from:"Malone Store <YOUR_GMAIL@gmail.com>",
-to:order.email,
-subject:`📦 Order Update: ${order.status}`,
-html:`
-<h2>Order Status Updated</h2>
+from: "Store <YOUR_GMAIL@gmail.com>",
+to: order.email,
+subject: `📦 Order Update: ${order.status}`,
+html: `
+<h2>Order Update</h2>
 
-<p><b>Name:</b> ${order.fullName}</p>
-<p><b>Status:</b> ${order.status}</p>
+<p>Name: ${order.fullName}</p>
+<p>Status: <b>${order.status}</b></p>
 
 <p>Thank you for shopping with us ✔</p>
 `
 });
 
-res.json({message:"Status updated + email sent ✔"});
+res.json({ message: "Status updated ✔" });
 
 }catch(err){
-console.log(err);
-res.status(500).json({message:"Update failed"});
+console.log(err.message);
+res.status(500).json({ message: "Update failed" });
 }
 
 });
 
-/* ================= SERVER ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, ()=>{
