@@ -5,6 +5,13 @@ const multer = require("multer");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
+const africastalking = require("africastalking")({
+apiKey: "atsk_6ed16e060eb34b496c53914e619761dedd73be3fd152d6b67c06317242ed135a9e127c94",
+username: "sandbox"
+});
+
+const sms = africastalking.SMS;
+
 const app = express();
 
 app.use(cors());
@@ -12,11 +19,9 @@ app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
 /* ================= MONGO ================= */
-const MONGO_URL = "mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store?retryWrites=true&w=majority";
-
-mongoose.connect(MONGO_URL)
+mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("MongoDB Error:", err.message));
+.catch(err=>console.log(err));
 
 /* ================= MULTER ================= */
 const storage = multer.diskStorage({
@@ -58,12 +63,10 @@ pass:"jzui tqah ngvi vmgc"
 
 /* ================= PRODUCTS ================= */
 
-// GET
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-// ADD PRODUCT
 app.post("/products", upload.single("image"), async (req,res)=>{
 const product = new Product({
 name:req.body.name,
@@ -71,38 +74,41 @@ price:req.body.price,
 image:req.file.filename
 });
 await product.save();
-res.json({message:"Product added ✔"});
+res.json({message:"Added ✔"});
 });
 
-// DELETE PRODUCT
 app.delete("/product/:id", async (req,res)=>{
 await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
+res.json({message:"Deleted"});
 });
 
-// UPDATE PRICE
 app.put("/product/:id", async (req,res)=>{
 const p = await Product.findById(req.params.id);
 p.price = req.body.price;
 await p.save();
-res.json({message:"Updated ✔"});
+res.json({message:"Updated"});
 });
 
 /* ================= ORDERS ================= */
 
-// GET ORDERS
 app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-// CREATE ORDER
 app.post("/order", async (req,res)=>{
 
 try{
 
+/* FORMAT PHONE */
+let phone = req.body.phone;
+if(phone.startsWith("07")){
+phone = "+254" + phone.slice(1);
+}
+
+/* SAVE ORDER */
 const order = new Order({
 fullName:req.body.fullName,
-phone:req.body.phone,
+phone:phone,
 email:req.body.email,
 location:req.body.location,
 items:req.body.items,
@@ -112,57 +118,77 @@ deliveryDate:req.body.deliveryDate
 
 await order.save();
 
-/* EMAIL CUSTOMER */
+/* SEND EMAIL */
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:"🛒 Order Confirmed",
+subject:"🛒 Order Confirmation",
 html:`
-<h2>Hello ${order.fullName}</h2>
+<h2>Thank you for your order 🎉</h2>
 
-<p>Your order is confirmed ✔</p>
+<p><b>Name:</b> ${order.fullName}</p>
+<p><b>Phone:</b> ${order.phone}</p>
+<p><b>Location:</b> ${order.location}</p>
 
-<p><b>Total:</b> KES ${order.total}</p>
-
-<p style="color:orange;">
-🚚 Delivery by: <b>${order.deliveryDate}</b>
-</p>
-
+<h3>Items:</h3>
 <ul>
 ${order.items.map(i=>`
 <li>${i.name} - KES ${i.price}</li>
 `).join("")}
 </ul>
+
+<p><b>Total:</b> KES ${order.total}</p>
+
+<p><b>Status:</b> ${order.status}</p>
+
+<p style="color:orange;">
+🚚 Delivery by: ${order.deliveryDate}
+</p>
 `
+});
+
+/* SEND SMS */
+await sms.send({
+to: phone,
+message: `Hi ${order.fullName}, your order for ${order.items[0].name} (KES ${order.total}) is confirmed ✔. Delivery by ${order.deliveryDate}.`
 });
 
 res.json({message:"Order placed ✔"});
 
 }catch(err){
-console.log(err);
-res.status(500).json({message:"Order failed"});
+console.log("ORDER ERROR:", err.message);
+res.status(500).json({message:"Error"});
 }
 
 });
 
-// UPDATE STATUS
+/* UPDATE STATUS + SMS */
+
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
+
 order.status = req.body.status;
 await order.save();
 
-res.json({message:"Updated ✔"});
-
+/* SEND SMS UPDATE */
+await sms.send({
+to: order.phone,
+message: `Hi ${order.fullName}, your order status is now: ${order.status}.`
 });
 
-// DELETE ORDER
+res.json({message:"Updated ✔"});
+});
+
+/* DELETE ORDER */
+
 app.delete("/order/:id", async (req,res)=>{
 await Order.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
+res.json({message:"Deleted"});
 });
 
 /* ================= SERVER ================= */
+
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
