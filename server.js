@@ -46,7 +46,7 @@ const transporter = nodemailer.createTransport({
 service: "gmail",
 auth: {
 user: "buanakwenda@gmail.com",
-pass: "ydzw pgya mkqs okwe"
+pass: process.env.EMAIL_PASS
 }
 });
 
@@ -54,13 +54,13 @@ pass: "ydzw pgya mkqs okwe"
    PRODUCTS API
 ========================= */
 
-/* GET */
+/* GET ALL PRODUCTS */
 app.get("/products", async (req, res) => {
 const products = await Product.find();
 res.json(products);
 });
 
-/* ADD */
+/* ADD PRODUCT */
 app.post("/add-product", async (req, res) => {
 
 const product = new Product({
@@ -75,7 +75,7 @@ res.json(product);
 
 });
 
-/* UPDATE */
+/* UPDATE PRODUCT */
 app.put("/update-product/:id", async (req, res) => {
 
 await Product.findByIdAndUpdate(req.params.id, {
@@ -88,7 +88,7 @@ res.json({ message: "Updated" });
 
 });
 
-/* DELETE */
+/* DELETE PRODUCT */
 app.delete("/delete-product/:id", async (req, res) => {
 
 await Product.findByIdAndDelete(req.params.id);
@@ -106,7 +106,7 @@ app.post("/order", async (req, res) => {
 const order = new Order(req.body);
 await order.save();
 
-/* EMAIL CUSTOMER */
+/* SEND EMAIL */
 try {
 await transporter.sendMail({
 from: "Store <buanakwenda@gmail.com>",
@@ -114,15 +114,21 @@ to: req.body.email,
 subject: "🛒 Order Confirmation",
 html: `
 <h2>🎉 Order Received</h2>
+
 <p><b>Name:</b> ${req.body.name}</p>
+<p><b>Phone:</b> ${req.body.phone}</p>
 <p><b>Total:</b> ${req.body.amount} KES</p>
-<p>Status: Pending</p>
+
+<h3>Status: Pending</h3>
+
+<p>We will contact you soon 🚚</p>
+
 <hr>
 <p>Thank you for shopping with us ❤️</p>
 `
 });
 } catch (err) {
-console.log(err);
+console.log("Email error ❌", err);
 }
 
 res.json(order);
@@ -130,7 +136,7 @@ res.json(order);
 });
 
 /* =========================
-   ORDERS
+   GET ORDERS
 ========================= */
 
 app.get("/orders", async (req, res) => {
