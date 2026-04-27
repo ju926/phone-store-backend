@@ -40,7 +40,7 @@ date:{type:Date,default:Date.now}
 const transporter = nodemailer.createTransport({
 service:"gmail",
 auth:{
-user:"okolajulian@gmail.com",
+user:"okola5775@gmail.com",
 pass:"lchm zooe ygco adub"
 }
 });
