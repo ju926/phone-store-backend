@@ -5,25 +5,20 @@ const multer = require("multer");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
-const africastalking = require("africastalking")({
-apiKey: "atsk_6ed16e060eb34b496c53914e619761dedd73be3fd152d6b67c06317242ed135a9e127c94",
-username: "sandbox"
-});
-
-const sms = africastalking.SMS;
-
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-/* ================= MONGO ================= */
+/* ================= DATABASE ================= */
+
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.catch(err=>console.log("Mongo Error:",err));
 
-/* ================= MULTER ================= */
+/* ================= IMAGE UPLOAD ================= */
+
 const storage = multer.diskStorage({
 destination:"uploads/",
 filename:(req,file,cb)=>{
@@ -34,6 +29,7 @@ cb(null,Date.now()+path.extname(file.originalname));
 const upload = multer({storage});
 
 /* ================= MODELS ================= */
+
 const Product = mongoose.model("Product",{
 name:String,
 price:Number,
@@ -52,14 +48,19 @@ status:{type:String,default:"Pending"},
 date:{type:Date,default:Date.now}
 });
 
-/* ================= EMAIL ================= */
+/* ================= EMAIL SETUP ================= */
+
 const transporter = nodemailer.createTransport({
 service:"gmail",
 auth:{
-user:"okola5775@gmail.com",
-pass:"jzui tqah ngvi vmgc"
+user:"YOUR_GMAIL@gmail.com",
+pass:"YOUR_APP_PASSWORD"
 }
 });
+
+/* ================= BASE URL ================= */
+
+const baseUrl = "https://phone-store-backend-9w7p.onrender.com";
 
 /* ================= PRODUCTS ================= */
 
@@ -73,8 +74,9 @@ name:req.body.name,
 price:req.body.price,
 image:req.file.filename
 });
+
 await product.save();
-res.json({message:"Added ✔"});
+res.json({message:"Product added ✔"});
 });
 
 app.delete("/product/:id", async (req,res)=>{
@@ -99,16 +101,9 @@ app.post("/order", async (req,res)=>{
 
 try{
 
-/* FORMAT PHONE */
-let phone = req.body.phone;
-if(phone.startsWith("07")){
-phone = "+254" + phone.slice(1);
-}
-
-/* SAVE ORDER */
 const order = new Order({
 fullName:req.body.fullName,
-phone:phone,
+phone:req.body.phone,
 email:req.body.email,
 location:req.body.location,
 items:req.body.items,
@@ -118,73 +113,93 @@ deliveryDate:req.body.deliveryDate
 
 await order.save();
 
-/* SEND EMAIL */
+/* ================= EMAIL INVOICE ================= */
+
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:"🛒 Order Confirmation",
-html:`
-<h2>Thank you for your order 🎉</h2>
+subject:`🧾 Invoice #${order._id}`,
 
+html:`
+<div style="font-family:Arial;background:#f4f4f4;padding:20px">
+
+<div style="max-width:600px;margin:auto;background:white;padding:20px;border-radius:10px">
+
+<h2 style="text-align:center;color:#2563eb;">🧾 ORDER INVOICE</h2>
+
+<p><b>Invoice ID:</b> ${order._id}</p>
 <p><b>Name:</b> ${order.fullName}</p>
 <p><b>Phone:</b> ${order.phone}</p>
 <p><b>Location:</b> ${order.location}</p>
 
-<h3>Items:</h3>
-<ul>
-${order.items.map(i=>`
-<li>${i.name} - KES ${i.price}</li>
-`).join("")}
-</ul>
+<hr>
 
-<p><b>Total:</b> KES ${order.total}</p>
+<h3>🛒 Product</h3>
 
-<p><b>Status:</b> ${order.status}</p>
+<div style="display:flex;gap:10px;border:1px solid #ddd;padding:10px;border-radius:10px">
 
-<p style="color:orange;">
-🚚 Delivery by: ${order.deliveryDate}
+<img src="${baseUrl}/uploads/${order.items[0].image}"
+style="width:100px;height:100px;object-fit:contain;border-radius:10px">
+
+<div>
+<p><b>${order.items[0].name}</b></p>
+<p>KES ${order.items[0].price}</p>
+</div>
+
+</div>
+
+<hr>
+
+<h3>💰 Summary</h3>
+
+<p>Subtotal: KES ${order.total}</p>
+<p><b>Total: KES ${order.total}</b></p>
+
+<hr>
+
+<p style="color:green;">
+🚚 Delivery Date: <b>${order.deliveryDate}</b>
 </p>
-`
-});
 
-/* SEND SMS */
-await sms.send({
-to: phone,
-message: `Hi ${order.fullName}, your order for ${order.items[0].name} (KES ${order.total}) is confirmed ✔. Delivery by ${order.deliveryDate}.`
+<p>Status: <b>${order.status}</b></p>
+
+<hr>
+
+<p style="text-align:center;color:gray;font-size:12px">
+Thank you for shopping with us 🙏
+</p>
+
+</div>
+
+</div>
+`
 });
 
 res.json({message:"Order placed ✔"});
 
 }catch(err){
-console.log("ORDER ERROR:", err.message);
+console.log("ORDER ERROR:",err.message);
 res.status(500).json({message:"Error"});
 }
 
 });
 
-/* UPDATE STATUS + SMS */
+/* ================= STATUS UPDATE ================= */
 
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
-
 order.status = req.body.status;
 await order.save();
 
-/* SEND SMS UPDATE */
-await sms.send({
-to: order.phone,
-message: `Hi ${order.fullName}, your order status is now: ${order.status}.`
+res.json({message:"Status updated ✔"});
 });
 
-res.json({message:"Updated ✔"});
-});
-
-/* DELETE ORDER */
+/* ================= DELETE ORDER ================= */
 
 app.delete("/order/:id", async (req,res)=>{
 await Order.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted"});
+res.json({message:"Order deleted"});
 });
 
 /* ================= SERVER ================= */
