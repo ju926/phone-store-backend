@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const mongoose = require("mongoose");
 
 const app = express();
 
@@ -8,11 +9,34 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 /* =========================
-   DATABASE (IN MEMORY)
+   MONGODB CONNECTION
 ========================= */
 
-let products = [];
-let orders = [];
+mongoose.connect(process.env.MONGO_URL)
+.then(() => console.log("MongoDB connected ✔"))
+.catch(err => console.log("DB error:", err));
+
+/* =========================
+   SCHEMAS
+========================= */
+
+const ProductSchema = new mongoose.Schema({
+name: String,
+price: String,
+image: String
+});
+
+const OrderSchema = new mongoose.Schema({
+name: String,
+phone: String,
+email: String,
+amount: String,
+cart: Array,
+status: { type: String, default: "pending" }
+});
+
+const Product = mongoose.model("Product", ProductSchema);
+const Order = mongoose.model("Order", OrderSchema);
 
 /* =========================
    EMAIL SETUP
@@ -22,107 +46,83 @@ const transporter = nodemailer.createTransport({
 service: "gmail",
 auth: {
 user: "buanakwenda@gmail.com",
-pass: "YOUR_APP_PASSWORD"
+pass: "ydzw pgya mkqs okwe"
 }
 });
 
 /* =========================
-   PRODUCTS
+   PRODUCTS API
 ========================= */
 
-/* GET ALL PRODUCTS */
-app.get("/products", (req, res) => {
+/* GET */
+app.get("/products", async (req, res) => {
+const products = await Product.find();
 res.json(products);
 });
 
-/* ADD PRODUCT (FIXED UNDEFINED ISSUE) */
-app.post("/add-product", (req, res) => {
+/* ADD */
+app.post("/add-product", async (req, res) => {
 
-console.log("RECEIVED PRODUCT:", req.body);
-
-const product = {
-id: Date.now(),
+const product = new Product({
 name: (req.body.name || "").trim() || "Product",
 price: req.body.price || 0,
 image: req.body.image || ""
-};
+});
 
-products.push(product);
+await product.save();
 
 res.json(product);
 
 });
 
-/* UPDATE PRODUCT */
-app.put("/update-product/:id", (req, res) => {
+/* UPDATE */
+app.put("/update-product/:id", async (req, res) => {
 
-let product = products.find(p => p.id == req.params.id);
+await Product.findByIdAndUpdate(req.params.id, {
+name: req.body.name,
+price: req.body.price,
+image: req.body.image
+});
 
-if (!product) {
-return res.status(404).json({ message: "Product not found" });
-}
-
-product.name = (req.body.name || "").trim();
-product.price = req.body.price;
-product.image = req.body.image;
-
-res.json(product);
+res.json({ message: "Updated" });
 
 });
 
-/* DELETE PRODUCT */
-app.delete("/delete-product/:id", (req, res) => {
+/* DELETE */
+app.delete("/delete-product/:id", async (req, res) => {
 
-products = products.filter(p => p.id != req.params.id);
+await Product.findByIdAndDelete(req.params.id);
 
 res.json({ message: "Deleted" });
 
 });
 
 /* =========================
-   ORDER + EMAIL SYSTEM
+   ORDER + EMAIL
 ========================= */
 
 app.post("/order", async (req, res) => {
 
-const order = {
-id: Date.now(),
-name: req.body.name,
-phone: req.body.phone,
-email: req.body.email,
-amount: req.body.amount,
-cart: req.body.cart,
-status: "pending"
-};
+const order = new Order(req.body);
+await order.save();
 
-orders.push(order);
-
-/* CUSTOMER EMAIL */
-const mailOptions = {
+/* EMAIL CUSTOMER */
+try {
+await transporter.sendMail({
 from: "Store <buanakwenda@gmail.com>",
 to: req.body.email,
 subject: "🛒 Order Confirmation",
 html: `
 <h2>🎉 Order Received</h2>
-
 <p><b>Name:</b> ${req.body.name}</p>
-<p><b>Phone:</b> ${req.body.phone}</p>
 <p><b>Total:</b> ${req.body.amount} KES</p>
-
-<h3>Status: Pending</h3>
-
-<p>We will contact you for delivery 🚚</p>
-
+<p>Status: Pending</p>
 <hr>
 <p>Thank you for shopping with us ❤️</p>
 `
-};
-
-try {
-await transporter.sendMail(mailOptions);
-console.log("Email sent ✔");
+});
 } catch (err) {
-console.log("Email error ❌", err);
+console.log(err);
 }
 
 res.json(order);
@@ -130,10 +130,11 @@ res.json(order);
 });
 
 /* =========================
-   GET ORDERS (OPTIONAL)
+   ORDERS
 ========================= */
 
-app.get("/orders", (req, res) => {
+app.get("/orders", async (req, res) => {
+const orders = await Order.find();
 res.json(orders);
 });
 
