@@ -1,11 +1,10 @@
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
-const nodemailer = require("nodemailer");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 
@@ -13,124 +12,99 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-/* =========================
-   MONGODB
-========================= */
+/* DB */
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB connected ✔"))
 .catch(err=>console.log(err));
 
-/* =========================
-   MODELS
-========================= */
+/* MODELS */
+const Product = mongoose.model("Product",{
+name:String,
+price:Number,
+image:String
+});
 
 const User = mongoose.model("User",{
 name:String,
 email:{type:String,unique:true},
-password:String,
-role:{type:String,default:"user"}
+password:String
 });
 
-/* =========================
-   AUTH KEY
-========================= */
-const JWT_SECRET = "malone_secret_key";
+/* MULTER (CLEAN) */
+const storage = multer.diskStorage({
+destination:(req,file,cb)=>{
+cb(null,"uploads/");
+},
+filename:(req,file,cb)=>{
+cb(null, Date.now() + path.extname(file.originalname));
+}
+});
 
-/* =========================
-   SIGNUP
-========================= */
+const upload = multer({
+storage,
+limits:{fileSize:5 * 1024 * 1024} // 5MB safety
+});
+
+/* PRODUCTS */
+app.get("/products", async (req,res)=>{
+res.json(await Product.find());
+});
+
+app.post("/add-product-upload", upload.single("image"), async (req,res)=>{
+
+const product = new Product({
+name:req.body.name || "Unnamed",
+price:req.body.price || 0,
+image:req.file ? req.file.filename : ""
+});
+
+await product.save();
+res.json(product);
+
+});
+
+/* SAFE DELETE */
+app.delete("/delete-product/:id", async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"deleted"});
+});
+
+/* AUTH CLEAN */
+const JWT_SECRET = "secret123";
+
 app.post("/signup", async (req,res)=>{
-
-const {name,email,password} = req.body;
-
 try{
 
-const hashed = await bcrypt.hash(password,10);
+const hash = await bcrypt.hash(req.body.password,10);
 
-const user = new User({
-name,
-email,
-password:hashed
-});
+await new User({
+name:req.body.name,
+email:req.body.email,
+password:hash
+}).save();
 
-await user.save();
-
-res.json({message:"Account created ✔"});
+res.json({message:"created"});
 
 }catch(err){
-res.status(400).json({message:"User already exists"});
+res.status(400).json({message:"exists"});
 }
-
 });
 
-/* =========================
-   LOGIN
-========================= */
 app.post("/login", async (req,res)=>{
 
-const {email,password} = req.body;
+const user = await User.findOne({email:req.body.email});
 
-const user = await User.findOne({email});
+if(!user) return res.json({message:"User not found"});
 
-if(!user){
-return res.status(400).json({message:"User not found"});
-}
+const ok = await bcrypt.compare(req.body.password,user.password);
 
-const check = await bcrypt.compare(password,user.password);
+if(!ok) return res.json({message:"Wrong password"});
 
-if(!check){
-return res.status(400).json({message:"Wrong password"});
-}
+const token = jwt.sign({id:user._id},JWT_SECRET);
 
-const token = jwt.sign(
-{id:user._id,role:user.role},
-JWT_SECRET,
-{expiresIn:"7d"}
-);
-
-res.json({
-message:"Login success ✔",
-token,
-user
+res.json({token,user});
 });
 
-});
-
-/* =========================
-   MIDDLEWARE (PROTECT)
-========================= */
-function auth(req,res,next){
-
-const token = req.headers.authorization;
-
-if(!token) return res.status(401).json({message:"No token"});
-
-try{
-
-const verified = jwt.verify(token.replace("Bearer ",""),JWT_SECRET);
-req.user = verified;
-
-next();
-
-}catch(err){
-res.status(401).json({message:"Invalid token"});
-}
-
-}
-
-/* =========================
-   EXAMPLE PROTECTED ROUTE
-========================= */
-app.get("/profile", auth, async (req,res)=>{
-const user = await User.findById(req.user.id);
-res.json(user);
-});
-
-/* =========================
-   START SERVER
-========================= */
+/* SERVER */
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT,()=>{
-console.log("Server running on "+PORT);
-});
+app.listen(PORT,()=>console.log("Running "+PORT));
