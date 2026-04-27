@@ -2,9 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 
@@ -12,12 +12,12 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
+if(!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 
-/* ================= DB ================= */
+/* ================= DB (YOUR URL) ================= */
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.catch(err=>console.log("DB ERROR:", err));
 
 /* ================= MODELS ================= */
 const Product = mongoose.model("Product",{
@@ -32,17 +32,9 @@ phone:String,
 email:String,
 location:String,
 items:Array,
-status:{type:String, default:"Pending"},
-date:{type:Date, default:Date.now}
+status:{type:String,default:"Pending"},
+date:{type:Date,default:Date.now}
 });
-
-/* ================= MULTER ================= */
-const storage = multer.diskStorage({
-destination:(req,file,cb)=>cb(null,"uploads/"),
-filename:(req,file,cb)=>cb(null, Date.now()+path.extname(file.originalname))
-});
-
-const upload = multer({storage});
 
 /* ================= EMAIL ================= */
 const transporter = nodemailer.createTransport({
@@ -58,29 +50,6 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-app.post("/add-product-upload", upload.single("image"), async (req,res)=>{
-const product = new Product({
-name:req.body.name,
-price:req.body.price,
-image:req.file.filename
-});
-await product.save();
-res.json(product);
-});
-
-app.put("/update-product/:id", async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,{
-name:req.body.name,
-price:req.body.price
-});
-res.json({message:"Updated"});
-});
-
-app.delete("/delete-product/:id", async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted"});
-});
-
 /* ================= ORDERS ================= */
 app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
@@ -89,14 +58,23 @@ res.json(await Order.find().sort({date:-1}));
 /* PLACE ORDER */
 app.post("/order", async (req,res)=>{
 
-const order = new Order(req.body);
+const items = (req.body.items ?? []).map(i=>({
+name:i?.name ?? "Unknown",
+price:Number(i?.price ?? 0)
+}));
+
+const order = new Order({
+...req.body,
+items
+});
+
 await order.save();
 
 /* EMAIL */
 await transporter.sendMail({
-from:"Malone Store <YOUR_GMAIL@gmail.com>",
+from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:"🛒 Order Received",
+subject:"Order Received ✔",
 html:`<h2>Thanks ${order.fullName}</h2><p>Status: ${order.status}</p>`
 });
 
@@ -111,21 +89,22 @@ const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
-/* EMAIL UPDATE */
 await transporter.sendMail({
-from:"Malone Store <YOUR_GMAIL@gmail.com>",
+from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:`📦 Order Update: ${order.status}`,
+subject:`Order Update: ${order.status}`,
 html:`
-<h2>Order Update</h2>
-<p><b>Name:</b> ${order.fullName}</p>
-<p><b>Status:</b> ${order.status}</p>
+<h2>Your Order Update</h2>
+<p>Name: ${order.fullName}</p>
+<p>Status: <b>${order.status}</b></p>
 `
 });
 
-res.json({message:"Status updated + email sent"});
+res.json({message:"Updated + Email sent"});
 });
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
-app.listen(PORT,()=>console.log("Server running " + PORT));
+app.listen(PORT,()=>{
+console.log("Server running on port " + PORT);
+});
