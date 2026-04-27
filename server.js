@@ -53,8 +53,8 @@ date:{type:Date,default:Date.now}
 const transporter = nodemailer.createTransport({
 service:"gmail",
 auth:{
-user:"YOUR_GMAIL@gmail.com",
-pass:"YOUR_APP_PASSWORD"
+user:"okola5775@gmail.com",
+pass:"jzui tqah ngvi vmgc"
 }
 });
 
