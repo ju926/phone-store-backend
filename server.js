@@ -16,18 +16,18 @@ app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
 /* =========================
-   CREATE UPLOADS FOLDER
+   UPLOAD FOLDER (RENDER SAFE)
 ========================= */
 if (!fs.existsSync("uploads")) {
 fs.mkdirSync("uploads");
 }
 
 /* =========================
-   DATABASE
+   DB CONNECTION
 ========================= */
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("DB Error:", err));
+.catch(err=>console.log("DB ERROR:", err));
 
 /* =========================
    MODELS
@@ -48,7 +48,7 @@ date:{type:Date,default:Date.now}
 });
 
 /* =========================
-   MULTER UPLOAD
+   MULTER
 ========================= */
 const storage = multer.diskStorage({
 destination:(req,file,cb)=>{
@@ -62,21 +62,29 @@ cb(null, Date.now() + path.extname(file.originalname));
 const upload = multer({storage});
 
 /* =========================
-   EMAIL CONFIG
+   EMAIL SETUP
 ========================= */
 const transporter = nodemailer.createTransport({
 service:"gmail",
 auth:{
-user:"YOUR_GMAIL@gmail.com",
-pass:"ydzw pgya mkqs okwe"
+user:"okola5775@gmail.com",
+pass:"flng ceog farw veyp"
 }
 });
 
-/* =========================
-   PRODUCTS API
-========================= */
+/* DEBUG */
+console.log("📧 Email system initialized");
 
-/* GET PRODUCTS */
+/* =========================
+   TEST ROUTE
+========================= */
+app.get("/", (req,res)=>{
+res.send("Store API Running ✔");
+});
+
+/* =========================
+   PRODUCTS
+========================= */
 app.get("/products", async (req,res)=>{
 const products = await Product.find();
 res.json(products);
@@ -86,6 +94,9 @@ res.json(products);
 app.post("/add-product-upload", upload.single("image"), async (req,res)=>{
 
 try{
+
+console.log("🔥 PRODUCT UPLOAD HIT");
+console.log(req.body);
 
 if(!req.file){
 return res.status(400).json({message:"No image uploaded"});
@@ -102,13 +113,13 @@ await product.save();
 res.json(product);
 
 }catch(err){
-console.log(err);
+console.log("UPLOAD ERROR:", err);
 res.status(500).json({message:"Upload failed"});
 }
 
 });
 
-/* UPDATE PRODUCT (EDIT PRICE/NAME) */
+/* UPDATE PRODUCT */
 app.put("/update-product/:id", async (req,res)=>{
 
 try{
@@ -121,6 +132,7 @@ price:req.body.price
 res.json({message:"Updated ✔"});
 
 }catch(err){
+console.log(err);
 res.status(500).json({message:"Update failed"});
 }
 
@@ -136,54 +148,72 @@ await Product.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
 
 }catch(err){
+console.log(err);
 res.status(500).json({message:"Delete failed"});
 }
 
 });
 
 /* =========================
-   ORDER + EMAIL SYSTEM
+   ORDER + EMAIL (DEBUGGED)
 ========================= */
 app.post("/order", async (req,res)=>{
 
 try{
 
+console.log("🔥 ORDER ROUTE HIT");
+console.log(req.body);
+
+/* VALIDATION */
+if(!req.body.email){
+return res.status(400).json({message:"Email missing"});
+}
+
+/* SAVE ORDER */
 const order = new Order(req.body);
 await order.save();
 
-/* EMAIL */
+console.log("📦 Order saved");
+
+/* EMAIL START */
+console.log("📨 Preparing email...");
+
 const mailOptions = {
 from:"Malone Store <YOUR_GMAIL@gmail.com>",
-to:order.email,
-subject:"🛒 Order Confirmation",
+to:req.body.email,
+subject:"🛒 Order Confirmation - Malone Store",
 html:`
 <h2>Thank you for your order 🎉</h2>
 
-<p><b>Name:</b> ${order.fullName}</p>
-<p><b>Phone:</b> ${order.phone}</p>
-<p><b>Location:</b> ${order.location}</p>
+<p><b>Name:</b> ${req.body.fullName}</p>
+<p><b>Phone:</b> ${req.body.phone}</p>
+<p><b>Location:</b> ${req.body.location}</p>
 
 <h3>Items:</h3>
 <ul>
-${order.items.map(i=>`<li>${i.name} - KES ${i.price}</li>`).join("")}
+${req.body.items.map(i=>`<li>${i.name} - KES ${i.price}</li>`).join("")}
 </ul>
 
 <p>Status: Pending</p>
-
 <hr>
-<p>We will contact you for delivery 🚚</p>
+<p>We will contact you soon 🚚</p>
 `
 };
 
-await transporter.sendMail(mailOptions);
+/* SEND EMAIL */
+let info = await transporter.sendMail(mailOptions);
 
-console.log("Email sent ✔");
+console.log("✅ EMAIL SENT SUCCESSFULLY");
+console.log("ID:", info.messageId);
 
 res.json({message:"Order placed + email sent ✔"});
 
 }catch(err){
-console.log("ORDER ERROR:", err);
+
+console.log("❌ ORDER ERROR:", err);
+
 res.status(500).json({message:"Order failed"});
+
 }
 
 });
@@ -194,5 +224,5 @@ res.status(500).json({message:"Order failed"});
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("Server running on port " + PORT);
+console.log("🚀 Server running on port " + PORT);
 });
