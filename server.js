@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+/* ✅ ENV TEST (IMPORTANT) */
+console.log("MY KEY:", process.env.PESAPAL_CONSUMER_KEY);
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -52,16 +55,20 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
+/* ================= ADD PRODUCT ================= */
 app.post("/products", multer().single("image"), async (req,res)=>{
+
 const product = new Product({
 name:req.body.name,
 price:req.body.price,
-image:req.file.filename
+image:req.file ? req.file.filename : req.body.image
 });
+
 await product.save();
 res.json({message:"Product added ✔"});
 });
 
+/* ================= UPDATE PRODUCT ================= */
 app.put("/product/:id", async (req,res)=>{
 const p = await Product.findById(req.params.id);
 p.price = req.body.price;
@@ -69,6 +76,7 @@ await p.save();
 res.json({message:"Updated ✔"});
 });
 
+/* ================= DELETE PRODUCT ================= */
 app.delete("/product/:id", async (req,res)=>{
 await Product.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
@@ -85,8 +93,9 @@ app.post("/order", async (req,res)=>{
 const order = new Order(req.body);
 await order.save();
 
+/* EMAIL */
 await transporter.sendMail({
-from:process.env.GMAIL_USER,
+from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
 subject:"🧾 Order Received",
 html:`
@@ -107,8 +116,9 @@ const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
+/* EMAIL */
 await transporter.sendMail({
-from:process.env.GMAIL_USER,
+from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
 subject:"📦 Order Update",
 html:`
@@ -121,12 +131,14 @@ html:`
 res.json({message:"Updated ✔"});
 });
 
-/* ================= PESPAL PAYMENT FIXED ================= */
+/* ================= PESAPAL PAYMENT ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 
 try{
 
-/* 1. GET TOKEN */
+console.log("PAYMENT REQUEST:", req.body);
+
+/* GET TOKEN */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
@@ -141,20 +153,17 @@ headers:{
 }
 );
 
+console.log("TOKEN RESPONSE:", tokenRes.data);
+
 const token = tokenRes.data.token;
 
-if(!token){
-return res.status(500).json({error:"Token failed",details:tokenRes.data});
-}
-
-/* 2. PAYMENT DATA */
+/* CREATE PAYMENT */
 const payment = {
 id: Date.now().toString(),
 currency: "KES",
 amount: Number(req.body.total),
-description: "Phone Store Order",
+description: "Phone Store Purchase",
 callback_url: process.env.CALLBACK_URL,
-notification_id: process.env.PESAPAL_NOTIFICATION_ID || "",
 
 billing_address:{
 email_address: req.body.email || "test@gmail.com",
@@ -165,7 +174,9 @@ line_1: "Nairobi"
 }
 };
 
-/* 3. SEND PAYMENT REQUEST */
+console.log("PAYMENT DATA:", payment);
+
+/* SEND PAYMENT REQUEST */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payment,
@@ -178,7 +189,7 @@ Authorization:`Bearer ${token}`,
 }
 );
 
-console.log("PESPAL RESPONSE:", response.data);
+console.log("PESAPAL RESPONSE:", response.data);
 
 res.json({
 redirect_url: response.data.redirect_url
@@ -186,7 +197,7 @@ redirect_url: response.data.redirect_url
 
 }catch(err){
 
-console.log("PESPAL ERROR:", err.response?.data || err.message);
+console.log("FULL ERROR:", err.response?.data || err.message);
 
 res.status(500).json({
 error:"Payment failed",
@@ -199,7 +210,7 @@ details: err.response?.data || err.message
 
 /* ================= CALLBACK ================= */
 app.get("/callback",(req,res)=>{
-console.log("Pesapal callback:",req.query);
+console.log("CALLBACK DATA:", req.query);
 res.send("Payment received ✔");
 });
 
@@ -213,5 +224,5 @@ res.json({message:"Deleted ✔"});
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("Server running on " + PORT);
+console.log("Server running on port " + PORT);
 });
