@@ -17,16 +17,16 @@ app.use(express.json());
 cloudinary.config({
 cloud_name: "driwjor64",
 api_key: "767812144924935",
-api_secret: "F60T1ktvNpmGF4OOf8i9U-jJ2p0" // ⚠️ regenerate this
+api_secret: "F60T1ktvNpmGF4OOf8i9U-jJ2p0"
 });
 
 /* ================= CLOUDINARY STORAGE ================= */
 
 const storage = new CloudinaryStorage({
-cloudinary: cloudinary,
-params: {
-folder: "phone-store",
-allowed_formats: ["jpg","png","jpeg"]
+cloudinary,
+params:{
+folder:"phone-store",
+allowed_formats:["jpg","png","jpeg"]
 }
 });
 
@@ -37,6 +37,16 @@ const upload = multer({ storage });
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
 .then(()=>console.log("MongoDB Connected ✔"))
 .catch(err=>console.log(err));
+
+/* ================= EMAIL ================= */
+
+const transporter = nodemailer.createTransport({
+service:"gmail",
+auth:{
+user:"okola5775@gmail.com",
+pass:"jzui tqah ngvi vmgc"
+}
+});
 
 /* ================= MODELS ================= */
 
@@ -54,19 +64,12 @@ location:String,
 items:Array,
 total:Number,
 deliveryDate:String,
-paymentStatus:{type:String,default:"paid"},
-status:{type:String,default:"Pending"},
+
+transactionCode:String,
+paymentStatus:{type:String,default:"pending_verification"},
+status:{type:String,default:"Processing"},
+
 date:{type:Date,default:Date.now}
-});
-
-/* ================= EMAIL ================= */
-
-const transporter = nodemailer.createTransport({
-service:"gmail",
-auth:{
-user:"jzui tqah ngvi vmgc",
-pass:"YOUR_APP_PASSWORD"
-}
 });
 
 /* ================= PRODUCTS ================= */
@@ -75,8 +78,7 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ================= ADD PRODUCT (CLOUDINARY) ================= */
-
+/* ADD PRODUCT (CLOUDINARY FIXED) */
 app.post("/products", upload.single("image"), async (req,res)=>{
 
 const product = new Product({
@@ -86,43 +88,36 @@ image:req.file.path   // ✅ CLOUDINARY URL
 });
 
 await product.save();
+
 res.json({message:"Product added ✔"});
 });
 
-/* ================= ORDER ================= */
+/* ================= ORDER CREATE ================= */
 
 app.post("/order", async (req,res)=>{
 
 const order = new Order(req.body);
 await order.save();
 
-/* EMAIL RECEIPT (JUMIA STYLE) */
-
+/* EMAIL: PROCESSING */
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:`🧾 Invoice #${order._id}`,
+subject:`📦 Order Received - Processing`,
 
 html:`
 <div style="font-family:Arial;padding:20px">
 
-<h2>🧾 ORDER RECEIPT</h2>
+<h2>📦 Order Received</h2>
 
-<p><b>Name:</b> ${order.fullName}</p>
-<p><b>Phone:</b> ${order.phone}</p>
-<p><b>Location:</b> ${order.location}</p>
+<p>Hi ${order.fullName},</p>
+
+<p>Your order has been received and is being processed.</p>
 
 <hr>
 
-<h3>📦 Items</h3>
-
-${order.items.map(i=>`
-<div style="margin-bottom:15px">
-<img src="${i.image}" style="width:120px;height:120px;object-fit:contain"><br>
-<b>${i.name}</b><br>
-KES ${i.price}
-</div>
-`).join("")}
+<p><b>Transaction Code:</b> ${order.transactionCode}</p>
+<p><b>Status:</b> Processing</p>
 
 <hr>
 
@@ -136,18 +131,36 @@ KES ${i.price}
 res.json({message:"Order placed ✔"});
 });
 
-/* ================= STATUS UPDATE ================= */
+/* ================= GET ORDERS ================= */
+
+app.get("/orders", async (req,res)=>{
+res.json(await Order.find().sort({date:-1}));
+});
+
+/* ================= UPDATE STATUS (ADMIN) ================= */
 
 app.put("/update-order-status/:id", async (req,res)=>{
 
-const order = await mongoose.model("Order").findById(req.params.id);
+const order = await Order.findById(req.params.id);
 
-if(!order) return res.status(404).json({message:"Not found"});
+if(!order){
+return res.status(404).json({message:"Order not found"});
+}
 
 order.status = req.body.status;
 await order.save();
 
 /* EMAIL UPDATE */
+let message = "";
+
+if(order.status === "Processing"){
+message = "Your order is being prepared 🚚";
+}
+
+if(order.status === "Delivered"){
+message = "Your order has been delivered 🎉";
+}
+
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
@@ -160,8 +173,14 @@ html:`
 
 <p>Hi ${order.fullName},</p>
 
-<p>Status: <b>${order.status}</b></p>
+<p><b>Status:</b> ${order.status}</p>
 
+<p style="color:green">${message}</p>
+
+<hr>
+
+<p><b>Transaction Code:</b> ${order.transactionCode}</p>
+<p><b>Total:</b> KES ${order.total}</p>
 <p>🚚 Delivery: ${order.deliveryDate}</p>
 
 </div>
@@ -171,10 +190,11 @@ html:`
 res.json({message:"Status updated ✔"});
 });
 
-/* ================= ORDERS ================= */
+/* ================= DELETE ORDER ================= */
 
-app.get("/orders", async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
+app.delete("/order/:id", async (req,res)=>{
+await Order.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
 });
 
 /* ================= SERVER ================= */
