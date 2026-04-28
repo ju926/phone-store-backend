@@ -1,53 +1,29 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
-
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const path = require("path");
+const axios = require("axios");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-/* ================= CLOUDINARY ================= */
-cloudinary.config({
-cloud_name: "driwjor64",
-api_key: "767812144924935",
-api_secret: "F60T1ktvNpmGF4OOf8i9U-jJ2p0"
-});
-
-const storage = new CloudinaryStorage({
-cloudinary,
-params:{
-folder:"store",
-allowed_formats:["jpg","png","jpeg"]
-}
-});
-
-const upload = multer({ storage });
+app.use("/uploads", express.static("uploads"));
 
 /* ================= DB ================= */
-mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
-.then(()=>console.log("MongoDB Connected ✔"));
-
-/* ================= EMAIL ================= */
-const transporter = nodemailer.createTransport({
-service:"gmail",
-auth:{
-user:"okola5775@gmail.com",
-pass:"jzui tqah ngvi vmgc"
-}
-});
+mongoose.connect(process.env.MONGO_URI)
+.then(()=>console.log("MongoDB Connected ✔"))
+.catch(err=>console.log(err));
 
 /* ================= MODELS ================= */
 const Product = mongoose.model("Product",{
 name:String,
 price:Number,
-image:String,
-stock:{type:Number,default:0}
+image:String
 });
 
 const Order = mongoose.model("Order",{
@@ -57,60 +33,54 @@ email:String,
 location:String,
 items:Array,
 total:Number,
+status:{type:String,default:"Pending"},
 paymentMethod:String,
 transactionCode:String,
-status:{type:String,default:"Processing"},
-paymentStatus:{type:String,default:"pending"},
 date:{type:Date,default:Date.now}
 });
+
+/* ================= EMAIL ================= */
+const transporter = nodemailer.createTransport({
+service:"gmail",
+auth:{
+user:process.env.GMAIL_USER,
+pass:process.env.GMAIL_PASS
+}
+});
+
+/* ================= BASE ================= */
+const baseUrl = "https://phone-store-backend-9w7p.onrender.com";
 
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-app.post("/products", upload.single("image"), async (req,res)=>{
-const p = new Product({
+/* ================= ADD PRODUCT ================= */
+app.post("/products", multer().single("image"), async (req,res)=>{
+
+const product = new Product({
 name:req.body.name,
 price:req.body.price,
-image:req.file.path,
-stock:req.body.stock || 0
+image:req.file ? req.file.filename : req.body.image
 });
-await p.save();
+
+await product.save();
 res.json({message:"Product added ✔"});
 });
 
+/* ================= UPDATE PRODUCT ================= */
 app.put("/product/:id", async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,req.body);
+const p = await Product.findById(req.params.id);
+p.price = req.body.price;
+await p.save();
 res.json({message:"Updated ✔"});
 });
 
+/* ================= DELETE PRODUCT ================= */
 app.delete("/product/:id", async (req,res)=>{
 await Product.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
-});
-
-/* ================= ORDER ================= */
-app.post("/order", async (req,res)=>{
-
-const order = new Order(req.body);
-await order.save();
-
-/* EMAIL: PROCESSING */
-await transporter.sendMail({
-from:"Store <YOUR_GMAIL@gmail.com>",
-to:order.email,
-subject:"Order Received",
-
-html:`
-<h2>Order Processing</h2>
-<p>Name: ${order.fullName}</p>
-<p>Status: Processing</p>
-<p>Transaction: ${order.transactionCode}</p>
-`
-});
-
-res.json({message:"Order placed ✔"});
 });
 
 /* ================= ORDERS ================= */
@@ -118,26 +88,103 @@ app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= STATUS UPDATE ================= */
+/* ================= CREATE ORDER ================= */
+app.post("/order", async (req,res)=>{
+
+const order = new Order(req.body);
+await order.save();
+
+/* EMAIL */
+await transporter.sendMail({
+from:"Store <"+process.env.GMAIL_USER+">",
+to:order.email,
+subject:"🧾 Order Received",
+html:`
+<h2>Order Received</h2>
+<p>Name: ${order.fullName}</p>
+<p>Total: KES ${order.total}</p>
+<p>Status: Pending</p>
+`
+});
+
+res.json({message:"Order placed ✔"});
+});
+
+/* ================= UPDATE STATUS ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
+/* EMAIL NOTIFICATION */
 await transporter.sendMail({
-from:"Store <YOUR_GMAIL@gmail.com>",
+from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
-subject:`Order ${order.status}`,
-
+subject:"📦 Order Update",
 html:`
-<h2>Order Update</h2>
+<h2>Status Update</h2>
 <p>Status: ${order.status}</p>
-<p>Transaction: ${order.transactionCode}</p>
+<p>Total: KES ${order.total}</p>
 `
 });
 
-res.json({message:"Status updated ✔"});
+res.json({message:"Updated ✔"});
+});
+
+/* ================= PESPAL PAYMENT ================= */
+app.post("/pesapal/pay", async (req,res)=>{
+
+try{
+
+const tokenRes = await axios.post(
+"https://pay.pesapal.com/v3/api/Auth/RequestToken",
+{
+consumer_key: process.env.PESAPAL_CONSUMER_KEY,
+consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
+}
+);
+
+const token = tokenRes.data.token;
+
+const payment = {
+id: Date.now().toString(),
+currency: "KES",
+amount: req.body.total,
+description: "Store Purchase",
+callback_url: process.env.CALLBACK_URL,
+billing_address:{
+email_address: req.body.email || "test@gmail.com",
+phone_number: req.body.phone || "0700000000",
+first_name: req.body.name || "Customer"
+}
+};
+
+const response = await axios.post(
+"https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
+payment,
+{
+headers:{
+Authorization:`Bearer ${token}`
+}
+}
+);
+
+res.json({
+redirect_url: response.data.redirect_url
+});
+
+}catch(err){
+console.log(err);
+res.status(500).json({error:"Payment failed"});
+}
+
+});
+
+/* ================= CALLBACK ================= */
+app.get("/callback",(req,res)=>{
+console.log("Pesapal callback:",req.query);
+res.send("Payment received ✔");
 });
 
 /* ================= DELETE ORDER ================= */
@@ -147,6 +194,7 @@ res.json({message:"Deleted ✔"});
 });
 
 /* ================= SERVER ================= */
-app.listen(10000,()=>{
-console.log("Server running ✔");
+const PORT = process.env.PORT || 10000;
+app.listen(PORT,()=>{
+console.log("Server running on " + PORT);
 });
