@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-/* ✅ ENV TEST (IMPORTANT) */
+/* ================= ENV TEST ================= */
 console.log("MY KEY:", process.env.PESAPAL_CONSUMER_KEY);
 
 const express = require("express");
@@ -55,7 +55,6 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ================= ADD PRODUCT ================= */
 app.post("/products", multer().single("image"), async (req,res)=>{
 
 const product = new Product({
@@ -68,7 +67,6 @@ await product.save();
 res.json({message:"Product added ✔"});
 });
 
-/* ================= UPDATE PRODUCT ================= */
 app.put("/product/:id", async (req,res)=>{
 const p = await Product.findById(req.params.id);
 p.price = req.body.price;
@@ -76,7 +74,6 @@ await p.save();
 res.json({message:"Updated ✔"});
 });
 
-/* ================= DELETE PRODUCT ================= */
 app.delete("/product/:id", async (req,res)=>{
 await Product.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
@@ -87,45 +84,30 @@ app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= CREATE ORDER ================= */
 app.post("/order", async (req,res)=>{
-
 const order = new Order(req.body);
 await order.save();
 
-/* EMAIL */
 await transporter.sendMail({
 from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
 subject:"🧾 Order Received",
-html:`
-<h2>Order Received</h2>
-<p>Name: ${order.fullName}</p>
-<p>Total: KES ${order.total}</p>
-<p>Status: Pending</p>
-`
+html:`<h2>Order Received</h2><p>Total: KES ${order.total}</p>`
 });
 
 res.json({message:"Order placed ✔"});
 });
 
-/* ================= UPDATE STATUS ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
-
 const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
-/* EMAIL */
 await transporter.sendMail({
 from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
 subject:"📦 Order Update",
-html:`
-<h2>Status Update</h2>
-<p>Status: ${order.status}</p>
-<p>Total: KES ${order.total}</p>
-`
+html:`<h2>Status: ${order.status}</h2>`
 });
 
 res.json({message:"Updated ✔"});
@@ -138,7 +120,7 @@ try{
 
 console.log("PAYMENT REQUEST:", req.body);
 
-/* GET TOKEN */
+/* ================= TOKEN ================= */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
@@ -157,7 +139,7 @@ console.log("TOKEN RESPONSE:", tokenRes.data);
 
 const token = tokenRes.data.token;
 
-/* CREATE PAYMENT */
+/* ================= PAYMENT OBJECT ================= */
 const payment = {
 id: Date.now().toString(),
 currency: "KES",
@@ -176,7 +158,7 @@ line_1: "Nairobi"
 
 console.log("PAYMENT DATA:", payment);
 
-/* SEND PAYMENT REQUEST */
+/* ================= REQUEST PAYMENT ================= */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payment,
@@ -189,6 +171,7 @@ Authorization:`Bearer ${token}`,
 }
 );
 
+/* ================= DEBUG RESPONSE ================= */
 console.log("PESAPAL RESPONSE:", response.data);
 
 res.json({
@@ -210,13 +193,13 @@ details: err.response?.data || err.message
 
 /* ================= CALLBACK ================= */
 app.get("/callback",(req,res)=>{
-console.log("CALLBACK DATA:", req.query);
+console.log("CALLBACK:", req.query);
 res.send("Payment received ✔");
 });
 
 /* ================= DELETE ORDER ================= */
 app.delete("/order/:id", async (req,res)=>{
-await Order.findByIdAndDelete(req.params.id);
+await mongoose.model("Order").findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
 });
 
