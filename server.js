@@ -12,34 +12,28 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= CLOUDINARY CONFIG ================= */
-
+/* ================= CLOUDINARY ================= */
 cloudinary.config({
 cloud_name: "driwjor64",
 api_key: "767812144924935",
 api_secret: "F60T1ktvNpmGF4OOf8i9U-jJ2p0"
 });
 
-/* ================= CLOUDINARY STORAGE ================= */
-
 const storage = new CloudinaryStorage({
 cloudinary,
 params:{
-folder:"phone-store",
+folder:"store",
 allowed_formats:["jpg","png","jpeg"]
 }
 });
 
 const upload = multer({ storage });
 
-/* ================= DATABASE ================= */
-
+/* ================= DB ================= */
 mongoose.connect("mongodb+srv://stephanitalia306_db_user:iuicmY9Dj2gcsINi@store.eggjy60.mongodb.net/store")
-.then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.then(()=>console.log("MongoDB Connected ✔"));
 
 /* ================= EMAIL ================= */
-
 const transporter = nodemailer.createTransport({
 service:"gmail",
 auth:{
@@ -49,11 +43,11 @@ pass:"jzui tqah ngvi vmgc"
 });
 
 /* ================= MODELS ================= */
-
 const Product = mongoose.model("Product",{
 name:String,
 price:Number,
-image:String
+image:String,
+stock:{type:Number,default:0}
 });
 
 const Order = mongoose.model("Order",{
@@ -63,37 +57,40 @@ email:String,
 location:String,
 items:Array,
 total:Number,
-deliveryDate:String,
-
+paymentMethod:String,
 transactionCode:String,
-paymentStatus:{type:String,default:"pending_verification"},
 status:{type:String,default:"Processing"},
-
+paymentStatus:{type:String,default:"pending"},
 date:{type:Date,default:Date.now}
 });
 
 /* ================= PRODUCTS ================= */
-
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ADD PRODUCT (CLOUDINARY FIXED) */
 app.post("/products", upload.single("image"), async (req,res)=>{
-
-const product = new Product({
+const p = new Product({
 name:req.body.name,
 price:req.body.price,
-image:req.file.path   // ✅ CLOUDINARY URL
+image:req.file.path,
+stock:req.body.stock || 0
 });
-
-await product.save();
-
+await p.save();
 res.json({message:"Product added ✔"});
 });
 
-/* ================= ORDER CREATE ================= */
+app.put("/product/:id", async (req,res)=>{
+await Product.findByIdAndUpdate(req.params.id,req.body);
+res.json({message:"Updated ✔"});
+});
 
+app.delete("/product/:id", async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
+});
+
+/* ================= ORDER ================= */
 app.post("/order", async (req,res)=>{
 
 const order = new Order(req.body);
@@ -103,87 +100,40 @@ await order.save();
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:`📦 Order Received - Processing`,
+subject:"Order Received",
 
 html:`
-<div style="font-family:Arial;padding:20px">
-
-<h2>📦 Order Received</h2>
-
-<p>Hi ${order.fullName},</p>
-
-<p>Your order has been received and is being processed.</p>
-
-<hr>
-
-<p><b>Transaction Code:</b> ${order.transactionCode}</p>
-<p><b>Status:</b> Processing</p>
-
-<hr>
-
-<p><b>Total:</b> KES ${order.total}</p>
-<p>🚚 Delivery: ${order.deliveryDate}</p>
-
-</div>
+<h2>Order Processing</h2>
+<p>Name: ${order.fullName}</p>
+<p>Status: Processing</p>
+<p>Transaction: ${order.transactionCode}</p>
 `
 });
 
 res.json({message:"Order placed ✔"});
 });
 
-/* ================= GET ORDERS ================= */
-
+/* ================= ORDERS ================= */
 app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= UPDATE STATUS (ADMIN) ================= */
-
+/* ================= STATUS UPDATE ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
-
-if(!order){
-return res.status(404).json({message:"Order not found"});
-}
-
 order.status = req.body.status;
 await order.save();
-
-/* EMAIL UPDATE */
-let message = "";
-
-if(order.status === "Processing"){
-message = "Your order is being prepared 🚚";
-}
-
-if(order.status === "Delivered"){
-message = "Your order has been delivered 🎉";
-}
 
 await transporter.sendMail({
 from:"Store <YOUR_GMAIL@gmail.com>",
 to:order.email,
-subject:`📦 Order Update: ${order.status}`,
+subject:`Order ${order.status}`,
 
 html:`
-<div style="font-family:Arial;padding:20px">
-
-<h2>📦 Order Update</h2>
-
-<p>Hi ${order.fullName},</p>
-
-<p><b>Status:</b> ${order.status}</p>
-
-<p style="color:green">${message}</p>
-
-<hr>
-
-<p><b>Transaction Code:</b> ${order.transactionCode}</p>
-<p><b>Total:</b> KES ${order.total}</p>
-<p>🚚 Delivery: ${order.deliveryDate}</p>
-
-</div>
+<h2>Order Update</h2>
+<p>Status: ${order.status}</p>
+<p>Transaction: ${order.transactionCode}</p>
 `
 });
 
@@ -191,16 +141,12 @@ res.json({message:"Status updated ✔"});
 });
 
 /* ================= DELETE ORDER ================= */
-
 app.delete("/order/:id", async (req,res)=>{
 await Order.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
 });
 
 /* ================= SERVER ================= */
-
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT,()=>{
-console.log("Server running on port " + PORT);
+app.listen(10000,()=>{
+console.log("Server running ✔");
 });
