@@ -5,7 +5,6 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
-const path = require("path");
 const axios = require("axios");
 
 const app = express();
@@ -48,28 +47,21 @@ pass:process.env.GMAIL_PASS
 }
 });
 
-/* ================= BASE ================= */
-const baseUrl = "https://phone-store-backend-9w7p.onrender.com";
-
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ================= ADD PRODUCT ================= */
 app.post("/products", multer().single("image"), async (req,res)=>{
-
 const product = new Product({
 name:req.body.name,
 price:req.body.price,
-image:req.file ? req.file.filename : req.body.image
+image:req.file.filename
 });
-
 await product.save();
 res.json({message:"Product added ✔"});
 });
 
-/* ================= UPDATE PRODUCT ================= */
 app.put("/product/:id", async (req,res)=>{
 const p = await Product.findById(req.params.id);
 p.price = req.body.price;
@@ -77,7 +69,6 @@ await p.save();
 res.json({message:"Updated ✔"});
 });
 
-/* ================= DELETE PRODUCT ================= */
 app.delete("/product/:id", async (req,res)=>{
 await Product.findByIdAndDelete(req.params.id);
 res.json({message:"Deleted ✔"});
@@ -94,9 +85,8 @@ app.post("/order", async (req,res)=>{
 const order = new Order(req.body);
 await order.save();
 
-/* EMAIL */
 await transporter.sendMail({
-from:"Store <"+process.env.GMAIL_USER+">",
+from:process.env.GMAIL_USER,
 to:order.email,
 subject:"🧾 Order Received",
 html:`
@@ -117,9 +107,8 @@ const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
-/* EMAIL NOTIFICATION */
 await transporter.sendMail({
-from:"Store <"+process.env.GMAIL_USER+">",
+from:process.env.GMAIL_USER,
 to:order.email,
 subject:"📦 Order Update",
 html:`
@@ -132,51 +121,78 @@ html:`
 res.json({message:"Updated ✔"});
 });
 
-/* ================= PESPAL PAYMENT ================= */
+/* ================= PESPAL PAYMENT FIXED ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 
 try{
 
+/* 1. GET TOKEN */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
 consumer_key: process.env.PESAPAL_CONSUMER_KEY,
 consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
+},
+{
+headers:{
+"Content-Type":"application/json",
+"Accept":"application/json"
+}
 }
 );
 
 const token = tokenRes.data.token;
 
+if(!token){
+return res.status(500).json({error:"Token failed",details:tokenRes.data});
+}
+
+/* 2. PAYMENT DATA */
 const payment = {
 id: Date.now().toString(),
 currency: "KES",
-amount: req.body.total,
-description: "Store Purchase",
+amount: Number(req.body.total),
+description: "Phone Store Order",
 callback_url: process.env.CALLBACK_URL,
+notification_id: process.env.PESAPAL_NOTIFICATION_ID || "",
+
 billing_address:{
 email_address: req.body.email || "test@gmail.com",
-phone_number: req.body.phone || "0700000000",
-first_name: req.body.name || "Customer"
+phone_number: req.body.phone || "254700000000",
+first_name: req.body.name || "Customer",
+last_name: "User",
+line_1: "Nairobi"
 }
 };
 
+/* 3. SEND PAYMENT REQUEST */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payment,
 {
 headers:{
-Authorization:`Bearer ${token}`
+Authorization:`Bearer ${token}`,
+"Content-Type":"application/json",
+"Accept":"application/json"
 }
 }
 );
+
+console.log("PESPAL RESPONSE:", response.data);
 
 res.json({
 redirect_url: response.data.redirect_url
 });
 
 }catch(err){
-console.log(err);
-res.status(500).json({error:"Payment failed"});
+
+console.log("PESPAL ERROR:", err.response?.data || err.message);
+
+res.status(500).json({
+error:"Payment failed",
+details: err.response?.data || err.message
+});
+
 }
 
 });
@@ -195,6 +211,7 @@ res.json({message:"Deleted ✔"});
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
+
 app.listen(PORT,()=>{
 console.log("Server running on " + PORT);
 });
