@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
-const nodemailer = require("nodemailer");
+const nodemailer = require("nodemailer"); // kept but not used now
 const axios = require("axios");
 
 const cloudinary = require("cloudinary").v2;
@@ -36,15 +36,6 @@ status:{type:String,default:"Pending"},
 paymentMethod:String,
 transactionCode:String,
 date:{type:Date,default:Date.now}
-});
-
-/* ================= EMAIL ================= */
-const transporter = nodemailer.createTransport({
-service:"gmail",
-auth:{
-user:process.env.GMAIL_USER,
-pass:process.env.GMAIL_PASS
-}
 });
 
 /* ================= CLOUDINARY ================= */
@@ -104,35 +95,21 @@ res.status(500).json({error:"Upload failed"});
 
 });
 
-/* ================= ORDERS (OLD SYSTEM) ================= */
-app.post("/order", async (req,res)=>{
-const order = new Order(req.body);
-await order.save();
-
-res.json({message:"Order placed ✔"});
-});
-
+/* ================= GET ORDERS ================= */
 app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= UPDATE ORDER STATUS ================= */
-app.put("/update-order-status/:id", async (req,res)=>{
-
-const order = await Order.findById(req.params.id);
-order.status = req.body.status;
-await order.save();
-
-res.json({message:"Updated ✔"});
-});
-
-/* ================= 🔥 FIXED PAY NOW ROUTE ================= */
+/* ================= 🔥 FIXED PAY NOW ================= */
 app.post("/order/pay", async (req, res) => {
+
   try {
+
+    console.log("🟢 Incoming request to /order/pay");
+
     const { name, email, phone, items, total } = req.body;
 
-    console.log("🔥 PAY NOW ORDER RECEIVED:");
-    console.log(req.body);
+    console.log("📦 DATA:", req.body);
 
     if (!name || !email || !phone || !items || items.length === 0) {
       return res.status(400).json({
@@ -154,93 +131,32 @@ app.post("/order/pay", async (req, res) => {
 
     await order.save();
 
-    await transporter.sendMail({
-      from:"Store <"+process.env.GMAIL_USER+">",
-      to:email,
-      subject:"🧾 Order Received",
-      html:`<h2>Order Received ✔</h2><p>Total: KES ${total}</p>`
-    });
+    console.log("✅ Order saved to DB");
 
-    res.json({
+    /* EMAIL DISABLED (TO PREVENT CRASH) */
+    console.log("📧 Email skipped (debug mode)");
+
+    return res.json({
       success: true,
       message: "Order received ✔"
     });
 
   } catch (err) {
-    console.log("ORDER ERROR:", err);
 
-    res.status(500).json({
+    console.log("❌ ERROR IN /order/pay:", err);
+
+    return res.status(500).json({
       success: false,
       message: "Server error"
     });
+
   }
-});
 
-/* ================= PESAPAL (OPTIONAL - NOT USED) ================= */
-app.post("/pesapal/pay", async (req,res)=>{
-
-try{
-
-const tokenRes = await axios.post(
-"https://pay.pesapal.com/v3/api/Auth/RequestToken",
-{
-consumer_key: process.env.PESAPAL_CONSUMER_KEY,
-consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
-}
-);
-
-const token = tokenRes.data.token;
-
-const payment = {
-id: Date.now().toString(),
-currency:"KES",
-amount:Number(req.body.total),
-description:"Store Purchase",
-callback_url:process.env.CALLBACK_URL,
-billing_address:{
-email_address:req.body.email,
-phone_number:req.body.phone,
-first_name:req.body.name
-}
-};
-
-const response = await axios.post(
-"https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
-payment,
-{
-headers:{
-Authorization:`Bearer ${token}`,
-"Content-Type":"application/json"
-}
-}
-);
-
-const redirect =
-response.data?.redirect_url ||
-response.data?.data?.redirect_url ||
-null;
-
-if(!redirect){
-return res.json({error:"No redirect URL",raw:response.data});
-}
-
-res.json({redirect_url:redirect});
-
-}catch(err){
-console.log("PESAPAL ERROR:", err.message);
-res.status(500).json({error:"Payment failed"});
-}
-
-});
-
-/* ================= CALLBACK ================= */
-app.get("/callback",(req,res)=>{
-res.send("Payment received ✔");
 });
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("Server running on port", PORT);
+console.log("🚀 Server running on port", PORT);
 });
