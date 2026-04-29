@@ -1,6 +1,5 @@
 require("dotenv").config();
 
-/* ================= ENV TEST ================= */
 console.log("MY KEY:", process.env.PESAPAL_CONSUMER_KEY);
 
 const express = require("express");
@@ -50,7 +49,7 @@ pass:process.env.GMAIL_PASS
 }
 });
 
-/* ================= TEST ROUTE ================= */
+/* ================= TEST ================= */
 app.get("/ping",(req,res)=>{
 console.log("PING HIT");
 res.send("OK");
@@ -124,7 +123,7 @@ try{
 
 console.log("PAYMENT REQUEST:", req.body);
 
-/* ================= TOKEN ================= */
+/* TOKEN */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
@@ -139,11 +138,11 @@ headers:{
 }
 );
 
-console.log("TOKEN RESPONSE:", tokenRes.data);
-
 const token = tokenRes.data.token;
 
-/* ================= PAYMENT OBJECT ================= */
+console.log("TOKEN OK");
+
+/* PAYMENT DATA */
 const payment = {
 id: Date.now().toString(),
 currency: "KES",
@@ -155,14 +154,14 @@ billing_address:{
 email_address: req.body.email,
 phone_number: req.body.phone,
 first_name: req.body.name,
-last_name: "User",
+last_name: "Customer",
 line_1: "Nairobi"
 }
 };
 
 console.log("PAYMENT DATA:", payment);
 
-/* ================= SEND REQUEST ================= */
+/* REQUEST PAYMENT */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payment,
@@ -175,22 +174,26 @@ Authorization:`Bearer ${token}`,
 }
 );
 
-/* ================= FULL RESPONSE ================= */
-console.log("FULL PESAPAL RESPONSE:", response.data);
+/* ================= FIX HERE ================= */
+console.log("RAW PESAPAL RESPONSE:", response.data);
 
-/* ================= FIX REDIRECT ================= */
 const redirect =
-response.data.redirect_url ||
-response.data.payment_url ||
-response.data.redirectUrl ||
+response.data?.redirect_url ||
+response.data?.data?.redirect_url ||
+response.data?.payment_url ||
+response.data?.redirectUrl ||
 null;
 
 if(!redirect){
-console.log("❌ NO REDIRECT URL FOUND");
-return res.json({ error:"No redirect URL from Pesapal", raw: response.data });
+console.log("❌ NO REDIRECT URL FOUND:", response.data);
+
+return res.json({
+error: "No redirect URL from Pesapal",
+raw: response.data
+});
 }
 
-/* ================= SUCCESS ================= */
+/* SUCCESS */
 res.json({ redirect_url: redirect });
 
 }catch(err){
