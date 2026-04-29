@@ -47,7 +47,7 @@ pass:process.env.GMAIL_PASS
 }
 });
 
-/* ================= CLOUDINARY CONFIG ================= */
+/* ================= CLOUDINARY ================= */
 cloudinary.config({
 cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
 api_key: process.env.CLOUDINARY_API_KEY,
@@ -69,6 +69,10 @@ app.get("/",(req,res)=>{
 res.send("Server Running ✔");
 });
 
+app.get("/ping",(req,res)=>{
+res.json({ok:true});
+});
+
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
@@ -79,89 +83,100 @@ app.post("/products", upload.single("image"), async (req,res)=>{
 
 try{
 
-console.log("BODY:", req.body);
-console.log("FILE:", req.file);
-
 if(!req.file){
 return res.status(400).json({error:"No image uploaded"});
 }
 
 const product = new Product({
-name: req.body.name,
-price: req.body.price,
-image: req.file.path
+name:req.body.name,
+price:req.body.price,
+image:req.file.path
 });
 
 await product.save();
 
-console.log("✔ PRODUCT SAVED");
-
 res.json({message:"Product added ✔"});
 
 }catch(err){
-console.log("UPLOAD ERROR:", err);
+console.log(err);
 res.status(500).json({error:"Upload failed"});
 }
 
 });
 
-/* ================= UPDATE PRODUCT ================= */
-app.put("/product/:id", async (req,res)=>{
-const p = await Product.findById(req.params.id);
-p.price = req.body.price;
-await p.save();
-res.json({message:"Updated ✔"});
-});
-
-/* ================= DELETE PRODUCT ================= */
-app.delete("/product/:id", async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
-});
-
-/* ================= ORDERS ================= */
-app.get("/orders", async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
-});
-
+/* ================= ORDERS (OLD SYSTEM) ================= */
 app.post("/order", async (req,res)=>{
-
 const order = new Order(req.body);
 await order.save();
-
-await transporter.sendMail({
-from:"Store <"+process.env.GMAIL_USER+">",
-to:order.email,
-subject:"🧾 Order Received",
-html:`<h2>Order Received</h2><p>Total: KES ${order.total}</p>`
-});
 
 res.json({message:"Order placed ✔"});
 });
 
-/* ================= UPDATE STATUS ================= */
+app.get("/orders", async (req,res)=>{
+res.json(await Order.find().sort({date:-1}));
+});
+
+/* ================= UPDATE ORDER STATUS ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
 
 const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
-/* EMAIL ONLY ON DELIVERED */
-if(req.body.status === "Delivered"){
-
-await transporter.sendMail({
-from:"Store <"+process.env.GMAIL_USER+">",
-to:order.email,
-subject:"📦 Delivered",
-html:`<h2>Your order has been delivered 🎉</h2>`
-});
-
-}
-
 res.json({message:"Updated ✔"});
 });
 
-/* ================= PESAPAL PAYMENT ================= */
+/* ================= 🔥 FIXED PAY NOW ROUTE ================= */
+app.post("/order/pay", async (req, res) => {
+  try {
+    const { name, email, phone, items, total } = req.body;
+
+    console.log("🔥 PAY NOW ORDER RECEIVED:");
+    console.log(req.body);
+
+    if (!name || !email || !phone || !items || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing order data"
+      });
+    }
+
+    const order = new Order({
+      fullName: name,
+      phone,
+      email,
+      location: "Online Checkout",
+      items,
+      total,
+      paymentMethod: "PayNow",
+      status: "Pending"
+    });
+
+    await order.save();
+
+    await transporter.sendMail({
+      from:"Store <"+process.env.GMAIL_USER+">",
+      to:email,
+      subject:"🧾 Order Received",
+      html:`<h2>Order Received ✔</h2><p>Total: KES ${total}</p>`
+    });
+
+    res.json({
+      success: true,
+      message: "Order received ✔"
+    });
+
+  } catch (err) {
+    console.log("ORDER ERROR:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
+/* ================= PESAPAL (OPTIONAL - NOT USED) ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 
 try{
@@ -206,16 +221,13 @@ response.data?.data?.redirect_url ||
 null;
 
 if(!redirect){
-return res.json({
-error:"No redirect URL",
-raw:response.data
-});
+return res.json({error:"No redirect URL",raw:response.data});
 }
 
 res.json({redirect_url:redirect});
 
 }catch(err){
-console.log("PESAPAL ERROR:", err.response?.data || err.message);
+console.log("PESAPAL ERROR:", err.message);
 res.status(500).json({error:"Payment failed"});
 }
 
@@ -223,7 +235,6 @@ res.status(500).json({error:"Payment failed"});
 
 /* ================= CALLBACK ================= */
 app.get("/callback",(req,res)=>{
-console.log("Callback:", req.query);
 res.send("Payment received ✔");
 });
 
