@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -7,7 +5,6 @@ const multer = require("multer");
 const nodemailer = require("nodemailer");
 const axios = require("axios");
 
-/* ================= CLOUDINARY ================= */
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
@@ -19,7 +16,7 @@ app.use(express.json());
 /* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URI)
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.catch(err=>console.log("DB ERROR:", err));
 
 /* ================= MODELS ================= */
 const Product = mongoose.model("Product",{
@@ -58,18 +55,18 @@ api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 const storage = new CloudinaryStorage({
-cloudinary: cloudinary,
-params: {
-folder: "phone-store",
-allowed_formats: ["jpg","jpeg","png","webp"]
+cloudinary,
+params:{
+folder:"phone-store",
+allowed_formats:["jpg","jpeg","png","webp"]
 }
 });
 
 const upload = multer({ storage });
 
 /* ================= TEST ================= */
-app.get("/ping",(req,res)=>{
-res.send("Server OK ✔");
+app.get("/",(req,res)=>{
+res.send("Server Running ✔");
 });
 
 /* ================= PRODUCTS ================= */
@@ -77,23 +74,32 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ================= ADD PRODUCT (CLOUDINARY) ================= */
+/* ================= ADD PRODUCT ================= */
 app.post("/products", upload.single("image"), async (req,res)=>{
 
 try{
 
+console.log("BODY:", req.body);
+console.log("FILE:", req.file);
+
+if(!req.file){
+return res.status(400).json({error:"No image uploaded"});
+}
+
 const product = new Product({
 name: req.body.name,
 price: req.body.price,
-image: req.file.path   // 🔥 Cloudinary URL
+image: req.file.path
 });
 
 await product.save();
 
+console.log("✔ PRODUCT SAVED");
+
 res.json({message:"Product added ✔"});
 
 }catch(err){
-console.log(err);
+console.log("UPLOAD ERROR:", err);
 res.status(500).json({error:"Upload failed"});
 }
 
@@ -119,6 +125,7 @@ res.json(await Order.find().sort({date:-1}));
 });
 
 app.post("/order", async (req,res)=>{
+
 const order = new Order(req.body);
 await order.save();
 
@@ -132,18 +139,24 @@ html:`<h2>Order Received</h2><p>Total: KES ${order.total}</p>`
 res.json({message:"Order placed ✔"});
 });
 
-/* ================= UPDATE ORDER STATUS ================= */
+/* ================= UPDATE STATUS ================= */
 app.put("/update-order-status/:id", async (req,res)=>{
+
 const order = await Order.findById(req.params.id);
 order.status = req.body.status;
 await order.save();
 
+/* EMAIL ONLY ON DELIVERED */
+if(req.body.status === "Delivered"){
+
 await transporter.sendMail({
 from:"Store <"+process.env.GMAIL_USER+">",
 to:order.email,
-subject:"📦 Order Update",
-html:`<h2>Status: ${order.status}</h2>`
+subject:"📦 Delivered",
+html:`<h2>Your order has been delivered 🎉</h2>`
 });
+
+}
 
 res.json({message:"Updated ✔"});
 });
@@ -153,9 +166,6 @@ app.post("/pesapal/pay", async (req,res)=>{
 
 try{
 
-console.log("PAYMENT REQUEST:", req.body);
-
-/* TOKEN */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
@@ -166,18 +176,16 @@ consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
 
 const token = tokenRes.data.token;
 
-/* PAYMENT */
 const payment = {
 id: Date.now().toString(),
-currency: "KES",
-amount: Number(req.body.total),
-description: "Phone Store Purchase",
-callback_url: process.env.CALLBACK_URL,
-
+currency:"KES",
+amount:Number(req.body.total),
+description:"Store Purchase",
+callback_url:process.env.CALLBACK_URL,
 billing_address:{
-email_address: req.body.email,
-phone_number: req.body.phone,
-first_name: req.body.name
+email_address:req.body.email,
+phone_number:req.body.phone,
+first_name:req.body.name
 }
 };
 
@@ -192,38 +200,30 @@ Authorization:`Bearer ${token}`,
 }
 );
 
-/* REDIRECT FIX */
 const redirect =
 response.data?.redirect_url ||
 response.data?.data?.redirect_url ||
-response.data?.payment_url ||
 null;
 
 if(!redirect){
 return res.json({
-error:"No redirect URL from Pesapal",
-raw: response.data
+error:"No redirect URL",
+raw:response.data
 });
 }
 
-res.json({ redirect_url: redirect });
+res.json({redirect_url:redirect});
 
 }catch(err){
-
-console.log("ERROR:", err.response?.data || err.message);
-
-res.status(500).json({
-error:"Payment failed",
-details: err.response?.data || err.message
-});
-
+console.log("PESAPAL ERROR:", err.response?.data || err.message);
+res.status(500).json({error:"Payment failed"});
 }
 
 });
 
 /* ================= CALLBACK ================= */
 app.get("/callback",(req,res)=>{
-console.log("CALLBACK:", req.query);
+console.log("Callback:", req.query);
 res.send("Payment received ✔");
 });
 
@@ -231,5 +231,5 @@ res.send("Payment received ✔");
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("Server running on port " + PORT);
+console.log("Server running on port", PORT);
 });
