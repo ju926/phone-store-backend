@@ -17,10 +17,14 @@ app.use(express.json());
 const MONGO_URI = process.env.MONGO_URL;
 const JWT_SECRET = "phone_store_secret_key";
 
-/* ================= DB ================= */
+/* ================= DB (FIXED SAFE CONNECT) ================= */
+if (!MONGO_URI) {
+console.error("❌ MONGO_URL is missing in environment variables");
+} else {
 mongoose.connect(MONGO_URI)
 .then(()=>console.log("MongoDB Connected ✔"))
 .catch(err=>console.log("DB ERROR:", err));
+}
 
 /* ================= MODELS ================= */
 const User = mongoose.model("User",{
@@ -164,7 +168,7 @@ res.json({message:"Product added ✔"});
 
 /* ================= ORDERS ================= */
 
-/* CREATE ORDER (PAY NOW) */
+/* CREATE ORDER */
 app.post("/order/pay", auth, async (req,res)=>{
 
 try{
@@ -186,40 +190,71 @@ status:"Pending"
 
 await order.save();
 
-/* EMAIL (SAFE BASIC VERSION) */
-console.log("📧 Order placed for:", user.email);
+console.log("📦 Order placed for:", user.email);
 
 res.json({success:true,message:"Order placed ✔"});
 
 }catch(err){
-console.log(err);
+console.log("ORDER ERROR:", err);
 res.status(500).json({error:"Server error"});
 }
 
 });
 
-/* GET ORDERS */
-app.get("/orders", async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
+/* ================= PAYSTACK / PESAPAL INTEGRATION SAFE ================= */
+app.post("/payments/pesapal/initiate", async (req,res)=>{
+
+try{
+
+const axios = require("axios");
+
+const response = await axios.post(
+"https://pay.makamesco-tech.co.ke/api/payments/pesapal/initiate",
+req.body,
+{
+headers:{
+"X-API-Key": process.env.MPESA_SECRET_KEY || "",
+"Content-Type":"application/json"
+}
+}
+);
+
+res.json(response.data);
+
+}catch(err){
+console.log("PAYMENT ERROR:", err.response?.data || err.message);
+res.status(500).json({error:"Payment failed"});
+}
+
 });
 
-/* DELETE ORDER */
-app.delete("/order/:id", async (req,res)=>{
-await Order.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
-});
+/* ================= PAYMENT STATUS ================= */
+app.get("/payments/status/:id", async (req,res)=>{
 
-/* UPDATE STATUS */
-app.put("/update-order-status/:id", async (req,res)=>{
-await Order.findByIdAndUpdate(req.params.id,{
-status:req.body.status
-});
-res.json({message:"Updated ✔"});
+try{
+
+const axios = require("axios");
+
+const response = await axios.get(
+`https://pay.makamesco-tech.co.ke/api/payments/pesapal/status/${req.params.id}`,
+{
+headers:{
+"X-API-Key": process.env.MPESA_SECRET_KEY || ""
+}
+}
+);
+
+res.json(response.data);
+
+}catch(err){
+res.status(500).json({error:"Status check failed"});
+}
+
 });
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("🚀 Server running on", PORT);
+console.log("🚀 Server running on port", PORT);
 });
