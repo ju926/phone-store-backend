@@ -3,17 +3,36 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
+const axios = require("axios");
 
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
+const admin = require("firebase-admin");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+
+require("dotenv").config();
+
 const app = express();
 
+/* ================= SECURITY MIDDLEWARE ================= */
+app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
+app.use(rateLimit({
+windowMs: 15 * 60 * 1000,
+max: 200
+}));
+
+/* ================= FIREBASE ADMIN (AUTH SECURITY) ================= */
+admin.initializeApp({
+credential: admin.credential.applicationDefault()
+});
+
 /* ================= DB ================= */
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URL)
 .then(()=>console.log("MongoDB Connected ✔"))
 .catch(err=>console.log("DB ERROR:", err));
 
@@ -28,6 +47,7 @@ const Order = mongoose.model("Order",{
 fullName:String,
 phone:String,
 email:String,
+userId:String,   // 🔐 IMPORTANT
 location:String,
 items:Array,
 total:Number,
@@ -36,51 +56,6 @@ paymentMethod:String,
 transactionCode:String,
 date:{type:Date,default:Date.now}
 });
-
-/* ================= EMAIL SETUP ================= */
-const transporter = nodemailer.createTransport({
-service: "gmail",
-auth: {
-user: process.env.GMAIL_USER,
-pass: process.env.GMAIL_PASS
-}
-});
-
-/* ================= SEND EMAIL ================= */
-async function sendOrderEmail(order){
-
-try{
-
-await transporter.sendMail({
-from: process.env.GMAIL_USER,
-to: order.email,
-subject: "🛒 Order Confirmation - Phone Store",
-html: `
-<h2>Hi ${order.fullName} 👋</h2>
-
-<p>Your order has been received successfully.</p>
-
-<hr>
-
-<p><b>Order ID:</b> ${order._id}</p>
-<p><b>Total:</b> KES ${order.total}</p>
-<p><b>Status:</b> ${order.status}</p>
-
-<hr>
-
-<p>We will update you once your order is processed.</p>
-
-<h3>Thank you for shopping with us 🛍</h3>
-`
-});
-
-console.log("📧 Email sent ✔");
-
-}catch(err){
-console.log("Email error:", err);
-}
-
-}
 
 /* ================= CLOUDINARY ================= */
 cloudinary.config({
@@ -99,6 +74,29 @@ allowed_formats:["jpg","jpeg","png","webp"]
 
 const upload = multer({ storage });
 
+/* ================= AUTH MIDDLEWARE ================= */
+async function verifyUser(req,res,next){
+
+try{
+
+const token = req.headers.authorization?.split("Bearer ")[1];
+
+if(!token){
+return res.status(401).json({error:"No token"});
+}
+
+const decoded = await admin.auth().verifyIdToken(token);
+
+req.user = decoded;
+
+next();
+
+}catch(err){
+return res.status(401).json({error:"Unauthorized"});
+}
+
+}
+
 /* ================= TEST ================= */
 app.get("/",(req,res)=>{
 res.send("Server Running ✔");
@@ -106,16 +104,12 @@ res.send("Server Running ✔");
 
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
-res.json(await Product.find().sort({_id:-1}));
+res.json(await Product.find());
 });
 
 app.post("/products", upload.single("image"), async (req,res)=>{
 
 try{
-
-if(!req.file){
-return res.status(400).json({error:"No image uploaded"});
-}
 
 const product = new Product({
 name:req.body.name,
@@ -128,108 +122,99 @@ await product.save();
 res.json({message:"Product added ✔"});
 
 }catch(err){
-console.log(err);
 res.status(500).json({error:"Upload failed"});
 }
 
 });
 
-/* ================= DELETE PRODUCT ================= */
-app.delete("/product/:id", async (req,res)=>{
-try{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Product deleted ✔"});
-}catch(err){
-res.status(500).json({error:"Delete failed"});
-}
-});
+/* ================= ORDERS (SECURE CREATE) ================= */
+app.post("/order/pay", verifyUser, async (req,res)=>{
 
-/* ================= ORDERS ================= */
-app.get("/orders", async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
-});
-
-/* ================= SINGLE ORDER ================= */
-app.get("/order/:id", async (req,res)=>{
-try{
-const order = await Order.findById(req.params.id);
-res.json(order);
-}catch(err){
-res.status(500).json({error:"Order not found"});
-}
-});
-
-/* ================= DELETE ORDER ================= */
-app.delete("/order/:id", async (req,res)=>{
-try{
-await Order.findByIdAndDelete(req.params.id);
-res.json({message:"Order deleted ✔"});
-}catch(err){
-res.status(500).json({error:"Delete failed"});
-}
-});
-
-/* ================= UPDATE STATUS ================= */
-app.put("/update-order-status/:id", async (req,res)=>{
 try{
 
-const order = await Order.findByIdAndUpdate(
-req.params.id,
-{ status:req.body.status },
-{ new:true }
-);
-
-/* OPTIONAL: send email on delivery */
-if(req.body.status === "Delivered"){
-sendOrderEmail(order);
-}
-
-res.json({message:"Status updated ✔"});
-
-}catch(err){
-res.status(500).json({error:"Update failed"});
-}
-});
-
-/* ================= CREATE ORDER + EMAIL ================= */
-app.post("/order/pay", async (req, res) => {
-
-try {
-
-const { name, email, phone, items, total } = req.body;
-
-if (!name || !email || !phone || !items || items.length === 0) {
-return res.status(400).json({ success:false, message:"Missing data" });
-}
+const { items, total, fullName, phone } = req.body;
 
 const order = new Order({
-fullName: name,
+fullName,
 phone,
-email,
-location: "Online Checkout",
+email:req.user.email,
+userId:req.user.uid,   // 🔐 SECURE LINK
 items,
 total,
-paymentMethod: "PayNow",
-status: "Pending"
+status:"Pending",
+paymentMethod:"PayNow"
 });
 
 await order.save();
 
-/* 🔥 SEND EMAIL AFTER ORDER */
-sendOrderEmail(order);
+res.json({success:true});
 
-return res.json({
-success: true,
-orderId: order._id,
-message: "Order created ✔"
+}catch(err){
+console.log(err);
+res.status(500).json({error:"Order failed"});
+}
+
 });
 
-} catch (err) {
+/* ================= USER ORDERS (SECURE) ================= */
+app.get("/my-orders", verifyUser, async (req,res)=>{
 
-console.log(err);
-res.status(500).json({ success:false, message:"Server error" });
+const orders = await Order.find({ userId: req.user.uid })
+.sort({date:-1});
 
+res.json(orders);
+
+});
+
+/* ================= ADMIN ORDERS ================= */
+app.get("/orders", async (req,res)=>{
+res.json(await Order.find().sort({date:-1}));
+});
+
+/* ================= UPDATE ORDER STATUS ================= */
+app.put("/update-order-status/:id", async (req,res)=>{
+
+await Order.findByIdAndUpdate(req.params.id,{
+status:req.body.status
+});
+
+res.json({message:"Updated ✔"});
+
+});
+
+/* ================= DELETE ORDER ================= */
+app.delete("/order/:id", async (req,res)=>{
+
+await Order.findByIdAndDelete(req.params.id);
+
+res.json({message:"Deleted ✔"});
+
+});
+
+/* ================= DELETE PRODUCT ================= */
+app.delete("/product/:id", async (req,res)=>{
+
+await Product.findByIdAndDelete(req.params.id);
+
+res.json({message:"Product deleted ✔"});
+
+});
+
+/* ================= EMAIL SETUP (READY) ================= */
+const transporter = nodemailer.createTransport({
+service:"gmail",
+auth:{
+user:process.env.GMAIL_USER,
+pass:process.env.GMAIL_PASS
 }
+});
+
+/* ================= PESAPAL READY HOOK ================= */
+app.post("/pesapal-callback", async (req,res)=>{
+
+console.log("Pesapal callback:", req.body);
+
+res.json({status:"received"});
 
 });
 
