@@ -2,8 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
-const nodemailer = require("nodemailer"); // kept but not used now
-const axios = require("axios");
+const nodemailer = require("nodemailer");
 
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
@@ -38,6 +37,51 @@ transactionCode:String,
 date:{type:Date,default:Date.now}
 });
 
+/* ================= EMAIL SETUP ================= */
+const transporter = nodemailer.createTransport({
+service: "gmail",
+auth: {
+user: process.env.GMAIL_USER,
+pass: process.env.GMAIL_PASS
+}
+});
+
+/* ================= SEND EMAIL ================= */
+async function sendOrderEmail(order){
+
+try{
+
+await transporter.sendMail({
+from: process.env.GMAIL_USER,
+to: order.email,
+subject: "🛒 Order Confirmation - Phone Store",
+html: `
+<h2>Hi ${order.fullName} 👋</h2>
+
+<p>Your order has been received successfully.</p>
+
+<hr>
+
+<p><b>Order ID:</b> ${order._id}</p>
+<p><b>Total:</b> KES ${order.total}</p>
+<p><b>Status:</b> ${order.status}</p>
+
+<hr>
+
+<p>We will update you once your order is processed.</p>
+
+<h3>Thank you for shopping with us 🛍</h3>
+`
+});
+
+console.log("📧 Email sent ✔");
+
+}catch(err){
+console.log("Email error:", err);
+}
+
+}
+
 /* ================= CLOUDINARY ================= */
 cloudinary.config({
 cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -60,16 +104,11 @@ app.get("/",(req,res)=>{
 res.send("Server Running ✔");
 });
 
-app.get("/ping",(req,res)=>{
-res.json({ok:true});
-});
-
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
-res.json(await Product.find());
+res.json(await Product.find().sort({_id:-1}));
 });
 
-/* ================= ADD PRODUCT ================= */
 app.post("/products", upload.single("image"), async (req,res)=>{
 
 try{
@@ -95,62 +134,102 @@ res.status(500).json({error:"Upload failed"});
 
 });
 
-/* ================= GET ORDERS ================= */
+/* ================= DELETE PRODUCT ================= */
+app.delete("/product/:id", async (req,res)=>{
+try{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Product deleted ✔"});
+}catch(err){
+res.status(500).json({error:"Delete failed"});
+}
+});
+
+/* ================= ORDERS ================= */
 app.get("/orders", async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= 🔥 FIXED PAY NOW ================= */
+/* ================= SINGLE ORDER ================= */
+app.get("/order/:id", async (req,res)=>{
+try{
+const order = await Order.findById(req.params.id);
+res.json(order);
+}catch(err){
+res.status(500).json({error:"Order not found"});
+}
+});
+
+/* ================= DELETE ORDER ================= */
+app.delete("/order/:id", async (req,res)=>{
+try{
+await Order.findByIdAndDelete(req.params.id);
+res.json({message:"Order deleted ✔"});
+}catch(err){
+res.status(500).json({error:"Delete failed"});
+}
+});
+
+/* ================= UPDATE STATUS ================= */
+app.put("/update-order-status/:id", async (req,res)=>{
+try{
+
+const order = await Order.findByIdAndUpdate(
+req.params.id,
+{ status:req.body.status },
+{ new:true }
+);
+
+/* OPTIONAL: send email on delivery */
+if(req.body.status === "Delivered"){
+sendOrderEmail(order);
+}
+
+res.json({message:"Status updated ✔"});
+
+}catch(err){
+res.status(500).json({error:"Update failed"});
+}
+});
+
+/* ================= CREATE ORDER + EMAIL ================= */
 app.post("/order/pay", async (req, res) => {
 
-  try {
+try {
 
-    console.log("🟢 Incoming request to /order/pay");
+const { name, email, phone, items, total } = req.body;
 
-    const { name, email, phone, items, total } = req.body;
+if (!name || !email || !phone || !items || items.length === 0) {
+return res.status(400).json({ success:false, message:"Missing data" });
+}
 
-    console.log("📦 DATA:", req.body);
+const order = new Order({
+fullName: name,
+phone,
+email,
+location: "Online Checkout",
+items,
+total,
+paymentMethod: "PayNow",
+status: "Pending"
+});
 
-    if (!name || !email || !phone || !items || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing order data"
-      });
-    }
+await order.save();
 
-    const order = new Order({
-      fullName: name,
-      phone,
-      email,
-      location: "Online Checkout",
-      items,
-      total,
-      paymentMethod: "PayNow",
-      status: "Pending"
-    });
+/* 🔥 SEND EMAIL AFTER ORDER */
+sendOrderEmail(order);
 
-    await order.save();
+return res.json({
+success: true,
+orderId: order._id,
+message: "Order created ✔"
+});
 
-    console.log("✅ Order saved to DB");
+} catch (err) {
 
-    /* EMAIL DISABLED (TO PREVENT CRASH) */
-    console.log("📧 Email skipped (debug mode)");
+console.log(err);
+res.status(500).json({ success:false, message:"Server error" });
 
-    return res.json({
-      success: true,
-      message: "Order received ✔"
-    });
-
-  } catch (err) {
-
-    console.log("❌ ERROR IN /order/pay:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
-
-  }
+}
 
 });
 
