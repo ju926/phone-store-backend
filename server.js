@@ -12,14 +12,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= ENV ================= */
+/* ================= CONFIG ================= */
 const MONGO_URI = process.env.MONGO_URL;
-const JWT_SECRET = process.env.JWT_SECRET || "super_secure_secret_change_this";
+const JWT_SECRET = process.env.JWT_SECRET || "phone_store_secret_key";
 
 /* ================= DB ================= */
 mongoose.connect(MONGO_URI)
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("DB ERROR:", err));
+.catch(err=>console.log(err));
 
 /* ================= MODELS ================= */
 const Admin = mongoose.model("Admin",{
@@ -46,35 +46,6 @@ status:{type:String,default:"Pending"},
 date:{type:Date,default:Date.now}
 });
 
-/* ================= CLOUDINARY ================= */
-cloudinary.config({
-cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
-api_key:process.env.CLOUDINARY_API_KEY,
-api_secret:process.env.CLOUDINARY_API_SECRET
-});
-
-const storage = new CloudinaryStorage({
-cloudinary,
-params:{
-folder:"phone-store",
-allowed_formats:["jpg","png","jpeg","webp"]
-}
-});
-
-const upload = multer({storage});
-
-/* ================= CREATE ADMIN (RUN ONCE) ================= */
-app.get("/create-admin", async (req,res)=>{
-const hash = await bcrypt.hash("Store@2026",10);
-
-await Admin.create({
-email:"admin@store.com",
-password:hash
-});
-
-res.send("Admin created ✔");
-});
-
 /* ================= ADMIN LOGIN ================= */
 app.post("/admin-login", async (req,res)=>{
 
@@ -93,7 +64,6 @@ JWT_SECRET,
 );
 
 res.json({token});
-
 });
 
 /* ================= ADMIN MIDDLEWARE ================= */
@@ -124,31 +94,32 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
+/* ADD PRODUCT */
+app.post("/products", verifyAdmin, async (req,res)=>{
 
-if(!req.file){
-return res.status(400).json({error:"No image"});
-}
-
-const product = new Product({
-name:req.body.name,
-price:req.body.price,
-image:req.file.path
-});
-
+const product = new Product(req.body);
 await product.save();
 
 res.json({message:"Product added ✔"});
 });
 
-app.delete("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted"});
+/* UPDATE PRODUCT (NAME + PRICE FIXED) */
+app.put("/product/:id", verifyAdmin, async (req,res)=>{
+
+await Product.findByIdAndUpdate(req.params.id,{
+$set:{
+name:req.body.name,
+price:req.body.price
+}
 });
 
-app.put("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,{price:req.body.price});
-res.json({message:"Updated"});
+res.json({message:"Updated ✔"});
+});
+
+/* DELETE PRODUCT */
+app.delete("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
 });
 
 /* ================= ORDERS ================= */
@@ -160,5 +131,5 @@ res.json(await Order.find());
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("🚀 Server running on port", PORT);
+console.log("🚀 Server running on",PORT);
 });
