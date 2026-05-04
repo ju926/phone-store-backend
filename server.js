@@ -6,35 +6,26 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
-const nodemailer = require("nodemailer");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-/* ================= ENV SAFE CHECK ================= */
+/* ================= ENV ================= */
 const MONGO_URI = process.env.MONGO_URL;
-const JWT_SECRET = "phone_store_secret_key";
+const JWT_SECRET = process.env.JWT_SECRET || "super_secure_secret_change_this";
 
-/* ================= DB (FIXED SAFE CONNECT) ================= */
-if (!MONGO_URI) {
-console.error("❌ MONGO_URL is missing in environment variables");
-} else {
+/* ================= DB ================= */
 mongoose.connect(MONGO_URI)
 .then(()=>console.log("MongoDB Connected ✔"))
 .catch(err=>console.log("DB ERROR:", err));
-}
 
 /* ================= MODELS ================= */
-const User = mongoose.model("User",{
-name:String,
+const Admin = mongoose.model("Admin",{
 email:String,
 password:String,
-phone:String,
-address:String,
-idNumber:String,
-deliveryType:String
+role:{type:String,default:"admin"}
 });
 
 const Product = mongoose.model("Product",{
@@ -57,99 +48,83 @@ date:{type:Date,default:Date.now}
 
 /* ================= CLOUDINARY ================= */
 cloudinary.config({
-cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-api_key: process.env.CLOUDINARY_API_KEY,
-api_secret: process.env.CLOUDINARY_API_SECRET
+cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
+api_key:process.env.CLOUDINARY_API_KEY,
+api_secret:process.env.CLOUDINARY_API_SECRET
 });
 
 const storage = new CloudinaryStorage({
 cloudinary,
 params:{
 folder:"phone-store",
-allowed_formats:["jpg","jpeg","png","webp"]
+allowed_formats:["jpg","png","jpeg","webp"]
 }
 });
 
-const upload = multer({ storage });
+const upload = multer({storage});
 
-/* ================= AUTH ================= */
+/* ================= CREATE ADMIN (RUN ONCE) ================= */
+app.get("/create-admin", async (req,res)=>{
+const hash = await bcrypt.hash("Store@2026",10);
 
-/* REGISTER */
-app.post("/register", async (req,res)=>{
-
-const {name,email,password} = req.body;
-
-const exist = await User.findOne({email});
-if(exist) return res.status(400).json({error:"User exists"});
-
-const hash = await bcrypt.hash(password,10);
-
-const user = new User({name,email,password:hash});
-await user.save();
-
-res.json({message:"Account created ✔"});
+await Admin.create({
+email:"admin@store.com",
+password:hash
 });
 
-/* LOGIN */
-app.post("/login", async (req,res)=>{
+res.send("Admin created ✔");
+});
+
+/* ================= ADMIN LOGIN ================= */
+app.post("/admin-login", async (req,res)=>{
 
 const {email,password} = req.body;
 
-const user = await User.findOne({email});
-if(!user) return res.status(400).json({error:"User not found"});
+const admin = await Admin.findOne({email});
+if(!admin) return res.status(400).json({error:"Invalid credentials"});
 
-const match = await bcrypt.compare(password,user.password);
-if(!match) return res.status(400).json({error:"Wrong password"});
+const match = await bcrypt.compare(password,admin.password);
+if(!match) return res.status(400).json({error:"Invalid credentials"});
 
 const token = jwt.sign(
-{id:user._id,email:user.email},
+{ id:admin._id, role:admin.role },
 JWT_SECRET,
-{expiresIn:"7d"}
+{ expiresIn:"24h" }
 );
 
-res.json({
-token,
-user:{
-id:user._id,
-name:user.name,
-email:user.email
-}
-});
+res.json({token});
 
 });
 
-/* ================= AUTH MIDDLEWARE ================= */
-function auth(req,res,next){
+/* ================= ADMIN MIDDLEWARE ================= */
+function verifyAdmin(req,res,next){
 
-const header = req.headers.authorization;
-
-if(!header) return res.status(401).json({error:"No token"});
+const auth = req.headers.authorization;
+if(!auth) return res.status(401).json({error:"No token"});
 
 try{
-const token = header.split(" ")[1];
+const token = auth.split(" ")[1];
 const decoded = jwt.verify(token,JWT_SECRET);
-req.user = decoded;
+
+if(decoded.role !== "admin"){
+return res.status(403).json({error:"Forbidden"});
+}
+
+req.admin = decoded;
 next();
+
 }catch(err){
 res.status(401).json({error:"Invalid token"});
 }
 
 }
 
-/* ================= CURRENT USER ================= */
-app.get("/me", auth, async (req,res)=>{
-
-const user = await User.findById(req.user.id).select("-password");
-res.json(user);
-
-});
-
 /* ================= PRODUCTS ================= */
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-app.post("/products", upload.single("image"), async (req,res)=>{
+app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
 
 if(!req.file){
 return res.status(400).json({error:"No image"});
@@ -166,90 +141,19 @@ await product.save();
 res.json({message:"Product added ✔"});
 });
 
+app.delete("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted"});
+});
+
+app.put("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndUpdate(req.params.id,{price:req.body.price});
+res.json({message:"Updated"});
+});
+
 /* ================= ORDERS ================= */
-
-/* CREATE ORDER */
-app.post("/order/pay", auth, async (req,res)=>{
-
-try{
-
-const {items,total} = req.body;
-
-const user = await User.findById(req.user.id);
-
-const order = new Order({
-userId:user._id,
-fullName:user.name,
-email:user.email,
-phone:user.phone,
-address:user.address,
-items,
-total,
-status:"Pending"
-});
-
-await order.save();
-
-console.log("📦 Order placed for:", user.email);
-
-res.json({success:true,message:"Order placed ✔"});
-
-}catch(err){
-console.log("ORDER ERROR:", err);
-res.status(500).json({error:"Server error"});
-}
-
-});
-
-/* ================= PAYSTACK / PESAPAL INTEGRATION SAFE ================= */
-app.post("/payments/pesapal/initiate", async (req,res)=>{
-
-try{
-
-const axios = require("axios");
-
-const response = await axios.post(
-"https://pay.makamesco-tech.co.ke/api/payments/pesapal/initiate",
-req.body,
-{
-headers:{
-"X-API-Key": process.env.MPESA_SECRET_KEY || "",
-"Content-Type":"application/json"
-}
-}
-);
-
-res.json(response.data);
-
-}catch(err){
-console.log("PAYMENT ERROR:", err.response?.data || err.message);
-res.status(500).json({error:"Payment failed"});
-}
-
-});
-
-/* ================= PAYMENT STATUS ================= */
-app.get("/payments/status/:id", async (req,res)=>{
-
-try{
-
-const axios = require("axios");
-
-const response = await axios.get(
-`https://pay.makamesco-tech.co.ke/api/payments/pesapal/status/${req.params.id}`,
-{
-headers:{
-"X-API-Key": process.env.MPESA_SECRET_KEY || ""
-}
-}
-);
-
-res.json(response.data);
-
-}catch(err){
-res.status(500).json({error:"Status check failed"});
-}
-
+app.get("/orders", verifyAdmin, async (req,res)=>{
+res.json(await Order.find());
 });
 
 /* ================= SERVER ================= */
