@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= CONFIG ================= */
+/* ================= ENV ================= */
 const MONGO_URI = process.env.MONGO_URL;
-const JWT_SECRET = process.env.JWT_SECRET || "phone_store_secret_key";
+const JWT_SECRET = process.env.JWT_SECRET || "malone_admin_secret";
 
 /* ================= DB ================= */
 mongoose.connect(MONGO_URI)
@@ -22,29 +22,50 @@ mongoose.connect(MONGO_URI)
 .catch(err=>console.log(err));
 
 /* ================= MODELS ================= */
+
+/* ADMIN */
 const Admin = mongoose.model("Admin",{
 email:String,
 password:String,
 role:{type:String,default:"admin"}
 });
 
+/* PRODUCT */
 const Product = mongoose.model("Product",{
 name:String,
 price:Number,
 image:String
 });
 
+/* ORDER */
 const Order = mongoose.model("Order",{
 userId:String,
 fullName:String,
 email:String,
 phone:String,
 address:String,
-items:Array,
+items:Array,   // IMPORTANT for analytics
 total:Number,
 status:{type:String,default:"Pending"},
 date:{type:Date,default:Date.now}
 });
+
+/* ================= CLOUDINARY ================= */
+cloudinary.config({
+cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+api_key: process.env.CLOUDINARY_API_KEY,
+api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+cloudinary,
+params:{
+folder:"malone-store",
+allowed_formats:["jpg","jpeg","png","webp"]
+}
+});
+
+const upload = multer({ storage });
 
 /* ================= ADMIN LOGIN ================= */
 app.post("/admin-login", async (req,res)=>{
@@ -52,21 +73,22 @@ app.post("/admin-login", async (req,res)=>{
 const {email,password} = req.body;
 
 const admin = await Admin.findOne({email});
-if(!admin) return res.status(400).json({error:"Invalid credentials"});
+if(!admin) return res.status(400).json({error:"Invalid login"});
 
 const match = await bcrypt.compare(password,admin.password);
-if(!match) return res.status(400).json({error:"Invalid credentials"});
+if(!match) return res.status(400).json({error:"Invalid login"});
 
 const token = jwt.sign(
-{ id:admin._id, role:admin.role },
+{id:admin._id,role:admin.role},
 JWT_SECRET,
-{ expiresIn:"24h" }
+{expiresIn:"24h"}
 );
 
 res.json({token});
+
 });
 
-/* ================= ADMIN MIDDLEWARE ================= */
+/* ================= AUTH MIDDLEWARE ================= */
 function verifyAdmin(req,res,next){
 
 const auth = req.headers.authorization;
@@ -90,20 +112,32 @@ res.status(401).json({error:"Invalid token"});
 }
 
 /* ================= PRODUCTS ================= */
+
+/* GET PRODUCTS */
 app.get("/products", async (req,res)=>{
 res.json(await Product.find());
 });
 
-/* ADD PRODUCT */
-app.post("/products", verifyAdmin, async (req,res)=>{
+/* UPLOAD PRODUCT (MATCH FRONTEND) */
+app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
 
-const product = new Product(req.body);
+if(!req.file){
+return res.status(400).json({error:"No image uploaded"});
+}
+
+const product = new Product({
+name:req.body.name,
+price:req.body.price,
+image:req.file.path
+});
+
 await product.save();
 
 res.json({message:"Product added ✔"});
+
 });
 
-/* UPDATE PRODUCT (NAME + PRICE FIXED) */
+/* UPDATE PRODUCT */
 app.put("/product/:id", verifyAdmin, async (req,res)=>{
 
 await Product.findByIdAndUpdate(req.params.id,{
@@ -114,6 +148,7 @@ price:req.body.price
 });
 
 res.json({message:"Updated ✔"});
+
 });
 
 /* DELETE PRODUCT */
@@ -123,13 +158,44 @@ res.json({message:"Deleted ✔"});
 });
 
 /* ================= ORDERS ================= */
+
+/* CREATE ORDER */
+app.post("/order/pay", async (req,res)=>{
+
+try{
+
+const {items,total,user} = req.body;
+
+const order = new Order({
+userId:user?.id || "guest",
+fullName:user?.name || "Guest",
+email:user?.email || "",
+phone:user?.phone || "",
+address:user?.address || "",
+items,
+total,
+status:"Pending"
+});
+
+await order.save();
+
+res.json({success:true,message:"Order placed ✔"});
+
+}catch(err){
+console.log(err);
+res.status(500).json({error:"Server error"});
+}
+
+});
+
+/* GET ORDERS (ADMIN) */
 app.get("/orders", verifyAdmin, async (req,res)=>{
-res.json(await Order.find());
+res.json(await Order.find().sort({date:-1}));
 });
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("🚀 Server running on",PORT);
+console.log("🚀 MALONE SERVER RUNNING ON PORT", PORT);
 });
