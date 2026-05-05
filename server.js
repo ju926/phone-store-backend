@@ -7,6 +7,7 @@ const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const axios = require("axios");
+const path = require("path");
 
 const app = express();
 
@@ -18,6 +19,9 @@ allowedHeaders: ["Content-Type","Authorization"]
 }));
 
 app.use(express.json());
+
+/* ================= STATIC FILES ================= */
+app.use(express.static(__dirname));
 
 /* ================= HEALTH CHECK ================= */
 app.get("/", (req,res)=>{
@@ -184,15 +188,15 @@ res.status(500).json({error:"Order failed"});
 }
 });
 
-/* ================= REAL PESAPAL CHECKOUT ================= */
+/* ================= PESAPAL PAYMENT ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 try{
 
 const {items,total} = req.body;
 
-console.log("🔥 PESAPAL PAYMENT:", total);
+console.log("🔥 PAYMENT:", total);
 
-/* 1. TOKEN */
+/* TOKEN */
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
@@ -203,26 +207,30 @@ consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
 
 const token = tokenRes.data.token;
 
-/* 2. ORDER */
+/* ORDER ID */
 const orderId = "ORDER_" + Date.now();
 
-/* 3. PAYLOAD */
+/* PAYLOAD */
 const payload = {
 id: orderId,
 currency: "KES",
 amount: total,
-description: "Phone Store Purchase",
-callback_url: "https://phone-store-backend-9w7p.onrender.com/",
+description: "Malone Store Purchase",
+
+/* 🔥 FIXED CALLBACK (IMPORTANT) */
+callback_url: "https://phone-store-backend-9w7p.onrender.com/confirm.html",
+
 notification_id: process.env.PESAPAL_IPN_ID,
-billing_address: {
-email_address: "customer@email.com",
-phone_number: "0700000000",
-country_code: "KE",
-first_name: "Customer"
+
+billing_address:{
+email_address:"customer@email.com",
+phone_number:"0700000000",
+country_code:"KE",
+first_name:"Customer"
 }
 };
 
-/* 4. REQUEST */
+/* REQUEST */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payload,
@@ -233,7 +241,7 @@ Authorization:`Bearer ${token}`
 }
 );
 
-/* 5. SAVE ORDER */
+/* SAVE ORDER */
 await Order.create({
 orderId,
 items,
@@ -241,7 +249,7 @@ total,
 status:"Pending"
 });
 
-/* 6. RETURN */
+/* RETURN */
 res.json(response.data);
 
 }catch(err){
@@ -256,12 +264,21 @@ details:err.response?.data || err.message
 }
 });
 
-/* ================= ORDERS LIST ================= */
+/* ================= ROUTES FOR HTML ================= */
+app.get("/confirm.html", (req,res)=>{
+res.sendFile(path.join(__dirname,"confirm.html"));
+});
+
+app.get("/failed.html", (req,res)=>{
+res.sendFile(path.join(__dirname,"failed.html"));
+});
+
+/* ================= ORDERS ================= */
 app.get("/orders", verifyAdmin, async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= START SERVER ================= */
+/* ================= START ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
