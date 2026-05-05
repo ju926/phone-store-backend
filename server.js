@@ -11,52 +11,52 @@ const axios = require("axios");
 const app = express();
 
 /* ================= MIDDLEWARE ================= */
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET","POST","PUT","DELETE"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));
+
 app.use(express.json());
+
+/* ================= ROOT (VERY IMPORTANT FIX) ================= */
+app.get("/", (req, res) => {
+  res.send("🚀 MALONE SERVER RUNNING");
+});
 
 /* ================= ENV ================= */
 const MONGO_URI = process.env.MONGO_URL;
 const JWT_SECRET = process.env.JWT_SECRET || "malone_admin_secret";
 
-/* PESA PAL ENV */
 const PESAPAL_BASE = "https://pay.pesapal.com/v3";
 const PESAPAL_KEY = process.env.PESAPAL_CONSUMER_KEY;
 const PESAPAL_SECRET = process.env.PESAPAL_CONSUMER_SECRET;
 const PESAPAL_IPN_ID = process.env.PESAPAL_IPN_ID;
 
 /* ================= DB ================= */
-if (!MONGO_URI) {
-  console.log("❌ MONGO_URL missing");
-} else {
-  mongoose.connect(MONGO_URI)
-  .then(()=>console.log("MongoDB Connected ✔"))
-  .catch(err=>console.log("DB ERROR:", err));
-}
+mongoose.connect(MONGO_URI)
+.then(()=>console.log("MongoDB Connected ✔"))
+.catch(err=>console.log("DB ERROR:", err));
 
 /* ================= MODELS ================= */
 const Admin = mongoose.model("Admin", {
-  email: String,
-  password: String,
-  role: { type: String, default: "admin" }
+  email:String,
+  password:String,
+  role:{type:String,default:"admin"}
 });
 
 const Product = mongoose.model("Product", {
-  name: String,
-  price: Number,
-  image: String
+  name:String,
+  price:Number,
+  image:String
 });
 
 const Order = mongoose.model("Order", {
-  orderId: String,
-  userId: String,
-  fullName: String,
-  email: String,
-  phone: String,
-  address: String,
-  items: Array,
-  total: Number,
-  status: { type: String, default: "Pending" },
-  date: { type: Date, default: Date.now }
+  orderId:String,
+  items:Array,
+  total:Number,
+  status:{type:String,default:"Pending"},
+  date:{type:Date,default:Date.now}
 });
 
 /* ================= CLOUDINARY ================= */
@@ -68,38 +68,13 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
   cloudinary,
-  params: {
-    folder: "malone-store",
-    allowed_formats: ["jpg", "jpeg", "png", "webp"]
+  params:{
+    folder:"malone-store",
+    allowed_formats:["jpg","png","jpeg","webp"]
   }
 });
 
 const upload = multer({ storage });
-
-/* ================= ADMIN LOGIN ================= */
-app.post("/admin-login", async (req,res)=>{
-try{
-
-const {email,password} = req.body;
-
-const admin = await Admin.findOne({email});
-if(!admin) return res.status(400).json({error:"Invalid login"});
-
-const match = await bcrypt.compare(password,admin.password);
-if(!match) return res.status(400).json({error:"Invalid login"});
-
-const token = jwt.sign(
-{id:admin._id,role:admin.role},
-JWT_SECRET,
-{expiresIn:"24h"}
-);
-
-res.json({token});
-
-}catch(err){
-res.status(500).json({error:"Server error"});
-}
-});
 
 /* ================= AUTH ================= */
 function verifyAdmin(req,res,next){
@@ -117,7 +92,7 @@ return res.status(403).json({error:"Forbidden"});
 req.admin = decoded;
 next();
 
-}catch(err){
+}catch{
 res.status(401).json({error:"Invalid token"});
 }
 }
@@ -128,9 +103,6 @@ res.json(await Product.find().sort({_id:-1}));
 });
 
 app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
-try{
-
-console.log("📥 PRODUCT UPLOAD:", req.body, req.file);
 
 if(!req.file){
 return res.status(400).json({error:"No image uploaded"});
@@ -138,34 +110,16 @@ return res.status(400).json({error:"No image uploaded"});
 
 const product = new Product({
 name:req.body.name,
-price:Number(req.body.price),
+price:req.body.price,
 image:req.file.path
 });
 
 await product.save();
 
-res.json({message:"Product added ✔", product});
-
-}catch(err){
-console.log(err);
-res.status(500).json({error:"Upload failed"});
-}
+res.json({message:"Uploaded ✔"});
 });
 
-app.put("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,{
-name:req.body.name,
-price:req.body.price
-});
-res.json({message:"Updated ✔"});
-});
-
-app.delete("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
-});
-
-/* ================= GET TOKEN ================= */
+/* ================= PESAPAL TOKEN ================= */
 async function getToken(){
 const res = await axios.post(`${PESAPAL_BASE}/api/Auth/RequestToken`,{
 consumer_key:PESAPAL_KEY,
@@ -174,13 +128,13 @@ consumer_secret:PESAPAL_SECRET
 return res.data.token;
 }
 
-/* ================= PESA PAL PAYMENT ================= */
+/* ================= PAYMENT ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 try{
 
-const {items,total,user} = req.body;
+const {items,total} = req.body;
 
-console.log("🔥 PESAPAL PAYMENT:", total);
+console.log("🔥 PAYMENT REQUEST:", total);
 
 const token = await getToken();
 
@@ -204,16 +158,12 @@ first_name: "Customer"
 const response = await axios.post(
 `${PESAPAL_BASE}/api/Transactions/SubmitOrderRequest`,
 payload,
-{
-headers:{
-Authorization:`Bearer ${token}`
-}
-}
+{ headers:{ Authorization:`Bearer ${token}` } }
 );
 
-console.log("📥 PESAPAL RESPONSE:", response.data);
+console.log("📥 PESAPAL:", response.data);
 
-/* SAVE ORDER INITIALLY */
+/* SAVE ORDER */
 await Order.create({
 orderId,
 items,
@@ -224,61 +174,11 @@ status:"Pending"
 res.json(response.data);
 
 }catch(err){
-console.log("❌ PESAPAL ERROR:", err.response?.data || err.message);
+console.log("❌ ERROR:", err.response?.data || err.message);
 res.status(500).json({error:"Payment failed"});
 }
 });
 
-/* ================= IPN ================= */
-app.post("/pesapal/ipn", async (req,res)=>{
-try{
-
-console.log("🔔 IPN:", req.body);
-
-const {orderTrackingId} = req.body;
-
-if(!orderTrackingId){
-return res.status(400).json({error:"No tracking ID"});
-}
-
-const token = await getToken();
-
-const status = await axios.get(
-`${PESAPAL_BASE}/api/Transactions/GetTransactionStatus?orderTrackingId=${orderTrackingId}`,
-{
-headers:{Authorization:`Bearer ${token}`}
-}
-);
-
-console.log("📊 STATUS:", status.data);
-
-/* UPDATE ORDER */
-await Order.updateOne(
-{orderId:orderTrackingId},
-{$set:{status:"Paid"}}
-);
-
-res.json({success:true});
-
-}catch(err){
-console.log("❌ IPN ERROR:", err.message);
-res.status(500).json({error:"IPN failed"});
-}
-});
-
-/* ================= ORDERS ================= */
-app.get("/orders", verifyAdmin, async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
-});
-
-/* ================= TEST ================= */
-app.get("/", (req,res)=>{
-res.send("🚀 MALONE SERVER RUNNING");
-});
-
-/* ================= START ================= */
+/* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT,()=>{
-console.log("🚀 SERVER RUNNING ON", PORT);
-});
+app.listen(PORT,()=>console.log("🚀 SERVER RUNNING",PORT));
