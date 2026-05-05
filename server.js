@@ -1,11 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const multer = require("multer");
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const axios = require("axios");
 
 const app = express();
@@ -16,7 +11,12 @@ app.use(express.json());
 /* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URL)
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.catch(err=>console.log("DB ERROR:", err));
+
+/* ================= TEST ROUTE ================= */
+app.get("/", (req,res)=>{
+res.send("🚀 MALONE BACKEND RUNNING");
+});
 
 /* ================= MODELS ================= */
 const Product = mongoose.model("Product",{
@@ -34,9 +34,44 @@ orderTrackingId:String,
 date:{type:Date,default:Date.now}
 });
 
-/* ================= PESAPAL TOKEN ================= */
-async function getToken(){
+/* ================= PRODUCTS ================= */
+app.get("/products", async (req,res)=>{
+try{
+const data = await Product.find();
+res.json(data);
+}catch(err){
+res.status(500).json({error:"Products failed"});
+}
+});
 
+/* ================= ORDERS ================= */
+app.get("/orders", async (req,res)=>{
+try{
+const data = await Order.find().sort({date:-1});
+res.json(data);
+}catch(err){
+res.status(500).json({error:"Orders failed"});
+}
+});
+
+/* ================= CREATE ORDER ================= */
+app.post("/order/pay", async (req,res)=>{
+try{
+
+const order = new Order(req.body);
+await order.save();
+
+res.json({success:true});
+
+}catch(err){
+res.status(500).json({error:"Order error"});
+}
+});
+
+/* ================= PESAPAL ================= */
+
+/* TOKEN */
+async function getToken(){
 const res = await axios.post(
 `${process.env.PESAPAL_BASE_URL}/api/Auth/RequestToken`,
 {
@@ -44,16 +79,13 @@ consumer_key:process.env.PESAPAL_CONSUMER_KEY,
 consumer_secret:process.env.PESAPAL_CONSUMER_SECRET
 }
 );
-
 return res.data.token;
 }
 
-/* ================= PAY ================= */
+/* PAY */
 app.post("/pesapal/pay", async (req,res)=>{
 
 try{
-
-console.log("PAY REQUEST:", req.body);
 
 const {amount,items} = req.body;
 
@@ -68,13 +100,14 @@ total:amount,
 orderTrackingId:orderId
 });
 
+/* REQUEST PESAPAL */
 const response = await axios.post(
 `${process.env.PESAPAL_BASE_URL}/api/Transactions/SubmitOrderRequest`,
 {
 id:orderId,
 currency:"KES",
 amount,
-description:"Phone Store",
+description:"Malone Store Purchase",
 callback_url:"https://yourdomain.com/confirm.html",
 notification_id:process.env.PESAPAL_IPN_ID,
 billing_address:{
@@ -91,12 +124,10 @@ Authorization:`Bearer ${token}`
 }
 );
 
-console.log("PESAPAL RESPONSE:", response.data);
-
 res.json(response.data);
 
 }catch(err){
-console.log("PAY ERROR:", err.response?.data || err.message);
+console.log(err.response?.data || err.message);
 res.status(500).json({error:"Payment failed"});
 }
 
@@ -112,11 +143,13 @@ const token = await getToken();
 const response = await axios.get(
 `${process.env.PESAPAL_BASE_URL}/api/Transactions/GetTransactionStatus?orderTrackingId=${req.params.id}`,
 {
-headers:{Authorization:`Bearer ${token}`}
+headers:{
+Authorization:`Bearer ${token}`
+}
 }
 );
 
-if(response.data.payment_status === "COMPLETED"){
+if(response.data.payment_status==="COMPLETED"){
 await Order.findOneAndUpdate(
 {orderTrackingId:req.params.id},
 {paymentStatus:"Paid",status:"Processing"}
@@ -126,12 +159,14 @@ await Order.findOneAndUpdate(
 res.json(response.data);
 
 }catch(err){
-res.status(500).json({error:"Status failed"});
+res.status(500).json({error:"Status error"});
 }
 
 });
 
 /* ================= SERVER ================= */
-app.listen(10000,()=>{
-console.log("🚀 Server running");
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT,()=>{
+console.log("🚀 SERVER RUNNING ON", PORT);
 });
