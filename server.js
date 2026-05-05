@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const axios = require("axios");
 
 const app = express();
 
@@ -16,6 +17,12 @@ app.use(express.json());
 /* ================= ENV ================= */
 const MONGO_URI = process.env.MONGO_URL;
 const JWT_SECRET = process.env.JWT_SECRET || "malone_admin_secret";
+
+/* PESA PAL ENV */
+const PESAPAL_BASE = "https://pay.pesapal.com/v3";
+const PESAPAL_KEY = process.env.PESAPAL_CONSUMER_KEY;
+const PESAPAL_SECRET = process.env.PESAPAL_CONSUMER_SECRET;
+const PESAPAL_IPN_ID = process.env.PESAPAL_IPN_ID;
 
 /* ================= DB ================= */
 if (!MONGO_URI) {
@@ -40,6 +47,7 @@ const Product = mongoose.model("Product", {
 });
 
 const Order = mongoose.model("Order", {
+  orderId: String,
   userId: String,
   fullName: String,
   email: String,
@@ -69,178 +77,208 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage });
 
 /* ================= ADMIN LOGIN ================= */
-app.post("/admin-login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+app.post("/admin-login", async (req,res)=>{
+try{
 
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(400).json({ error: "Invalid login" });
+const {email,password} = req.body;
 
-    const match = await bcrypt.compare(password, admin.password);
-    if (!match) return res.status(400).json({ error: "Invalid login" });
+const admin = await Admin.findOne({email});
+if(!admin) return res.status(400).json({error:"Invalid login"});
 
-    const token = jwt.sign(
-      { id: admin._id, role: admin.role },
-      JWT_SECRET,
-      { expiresIn: "24h" }
-    );
+const match = await bcrypt.compare(password,admin.password);
+if(!match) return res.status(400).json({error:"Invalid login"});
 
-    res.json({ token });
+const token = jwt.sign(
+{id:admin._id,role:admin.role},
+JWT_SECRET,
+{expiresIn:"24h"}
+);
 
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Server error" });
-  }
+res.json({token});
+
+}catch(err){
+res.status(500).json({error:"Server error"});
+}
 });
 
 /* ================= AUTH ================= */
-function verifyAdmin(req, res, next) {
-  const auth = req.headers.authorization;
+function verifyAdmin(req,res,next){
+const auth = req.headers.authorization;
+if(!auth) return res.status(401).json({error:"No token"});
 
-  if (!auth) return res.status(401).json({ error: "No token" });
+try{
+const token = auth.split(" ")[1];
+const decoded = jwt.verify(token,JWT_SECRET);
 
-  try {
-    const token = auth.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+if(decoded.role!=="admin"){
+return res.status(403).json({error:"Forbidden"});
+}
 
-    if (decoded.role !== "admin") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+req.admin = decoded;
+next();
 
-    req.admin = decoded;
-    next();
-
-  } catch (err) {
-    res.status(401).json({ error: "Invalid token" });
-  }
+}catch(err){
+res.status(401).json({error:"Invalid token"});
+}
 }
 
 /* ================= PRODUCTS ================= */
-
-/* GET PRODUCTS */
-app.get("/products", async (req, res) => {
-  try {
-    const data = await Product.find().sort({ _id: -1 });
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch products" });
-  }
+app.get("/products", async (req,res)=>{
+res.json(await Product.find().sort({_id:-1}));
 });
 
-/* ================= FIXED UPLOAD ================= */
-app.post("/products", verifyAdmin, upload.single("image"), async (req, res) => {
-  try {
+app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
+try{
 
-    console.log("📥 UPLOAD REQUEST RECEIVED");
-    console.log("BODY:", req.body);
-    console.log("FILE:", req.file);
+console.log("📥 PRODUCT UPLOAD:", req.body, req.file);
 
-    if (!req.file) {
-      return res.status(400).json({ error: "No image uploaded" });
-    }
+if(!req.file){
+return res.status(400).json({error:"No image uploaded"});
+}
 
-    if (!req.body.name || !req.body.price) {
-      return res.status(400).json({ error: "Missing name or price" });
-    }
-
-    const product = new Product({
-      name: req.body.name,
-      price: Number(req.body.price),
-      image: req.file.path
-    });
-
-    await product.save();
-
-    console.log("✅ PRODUCT SAVED:", product);
-
-    res.json({
-      message: "Product added ✔",
-      product
-    });
-
-  } catch (err) {
-    console.log("❌ UPLOAD ERROR:", err);
-    res.status(500).json({
-      error: "Upload failed",
-      details: err.message
-    });
-  }
+const product = new Product({
+name:req.body.name,
+price:Number(req.body.price),
+image:req.file.path
 });
 
-/* UPDATE PRODUCT */
-app.put("/product/:id", verifyAdmin, async (req, res) => {
-  try {
+await product.save();
 
-    await Product.findByIdAndUpdate(req.params.id, {
-      name: req.body.name,
-      price: req.body.price
-    });
+res.json({message:"Product added ✔", product});
 
-    res.json({ message: "Updated ✔" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Update failed" });
-  }
+}catch(err){
+console.log(err);
+res.status(500).json({error:"Upload failed"});
+}
 });
 
-/* DELETE PRODUCT */
-app.delete("/product/:id", verifyAdmin, async (req, res) => {
-  try {
+app.put("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndUpdate(req.params.id,{
+name:req.body.name,
+price:req.body.price
+});
+res.json({message:"Updated ✔"});
+});
 
-    await Product.findByIdAndDelete(req.params.id);
+app.delete("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
+});
 
-    res.json({ message: "Deleted ✔" });
+/* ================= GET TOKEN ================= */
+async function getToken(){
+const res = await axios.post(`${PESAPAL_BASE}/api/Auth/RequestToken`,{
+consumer_key:PESAPAL_KEY,
+consumer_secret:PESAPAL_SECRET
+});
+return res.data.token;
+}
 
-  } catch (err) {
-    res.status(500).json({ error: "Delete failed" });
-  }
+/* ================= PESA PAL PAYMENT ================= */
+app.post("/pesapal/pay", async (req,res)=>{
+try{
+
+const {items,total,user} = req.body;
+
+console.log("🔥 PESAPAL PAYMENT:", total);
+
+const token = await getToken();
+
+const orderId = "ORDER_" + Date.now();
+
+const payload = {
+id: orderId,
+currency: "KES",
+amount: total,
+description: "Malone Store Purchase",
+callback_url: "https://phone-store-backend-9w7p.onrender.com/confirm.html",
+notification_id: PESAPAL_IPN_ID,
+billing_address: {
+email_address: "customer@email.com",
+phone_number: "0700000000",
+country_code: "KE",
+first_name: "Customer"
+}
+};
+
+const response = await axios.post(
+`${PESAPAL_BASE}/api/Transactions/SubmitOrderRequest`,
+payload,
+{
+headers:{
+Authorization:`Bearer ${token}`
+}
+}
+);
+
+console.log("📥 PESAPAL RESPONSE:", response.data);
+
+/* SAVE ORDER INITIALLY */
+await Order.create({
+orderId,
+items,
+total,
+status:"Pending"
+});
+
+res.json(response.data);
+
+}catch(err){
+console.log("❌ PESAPAL ERROR:", err.response?.data || err.message);
+res.status(500).json({error:"Payment failed"});
+}
+});
+
+/* ================= IPN ================= */
+app.post("/pesapal/ipn", async (req,res)=>{
+try{
+
+console.log("🔔 IPN:", req.body);
+
+const {orderTrackingId} = req.body;
+
+if(!orderTrackingId){
+return res.status(400).json({error:"No tracking ID"});
+}
+
+const token = await getToken();
+
+const status = await axios.get(
+`${PESAPAL_BASE}/api/Transactions/GetTransactionStatus?orderTrackingId=${orderTrackingId}`,
+{
+headers:{Authorization:`Bearer ${token}`}
+}
+);
+
+console.log("📊 STATUS:", status.data);
+
+/* UPDATE ORDER */
+await Order.updateOne(
+{orderId:orderTrackingId},
+{$set:{status:"Paid"}}
+);
+
+res.json({success:true});
+
+}catch(err){
+console.log("❌ IPN ERROR:", err.message);
+res.status(500).json({error:"IPN failed"});
+}
 });
 
 /* ================= ORDERS ================= */
-app.post("/order/pay", async (req, res) => {
-  try {
-
-    const { items, total, user } = req.body;
-
-    const order = new Order({
-      userId: user?.id || "guest",
-      fullName: user?.name || "Guest",
-      email: user?.email || "",
-      phone: user?.phone || "",
-      address: user?.address || "",
-      items,
-      total,
-      status: "Pending"
-    });
-
-    await order.save();
-
-    res.json({ success: true, message: "Order placed ✔" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Order failed" });
-  }
+app.get("/orders", verifyAdmin, async (req,res)=>{
+res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= ORDERS GET ================= */
-app.get("/orders", verifyAdmin, async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ date: -1 });
-    res.json(orders);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch orders" });
-  }
-});
-
-/* ================= TEST ROUTE ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 MALONE SERVER RUNNING");
+/* ================= TEST ================= */
+app.get("/", (req,res)=>{
+res.send("🚀 MALONE SERVER RUNNING");
 });
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 10000;
 
-app.listen(PORT, () => {
-  console.log("🚀 MALONE SERVER RUNNING ON PORT", PORT);
+app.listen(PORT,()=>{
+console.log("🚀 SERVER RUNNING ON", PORT);
 });
