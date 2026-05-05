@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const axios = require("axios");
 
 const app = express();
 
@@ -18,7 +19,7 @@ allowedHeaders: ["Content-Type","Authorization"]
 
 app.use(express.json());
 
-/* ================= ROOT TEST ================= */
+/* ================= ROOT ================= */
 app.get("/", (req,res)=>{
 res.send("🚀 MALONE SERVER RUNNING");
 });
@@ -30,7 +31,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "malone_admin_secret";
 /* ================= DB ================= */
 mongoose.connect(MONGO_URI)
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log(err));
+.catch(err=>console.log("DB ERROR:", err));
 
 /* ================= MODELS ================= */
 const Admin = mongoose.model("Admin",{
@@ -76,6 +77,8 @@ const upload = multer({ storage });
 
 /* ================= ADMIN LOGIN ================= */
 app.post("/admin-login", async (req,res)=>{
+try{
+
 const {email,password} = req.body;
 
 const admin = await Admin.findOne({email});
@@ -91,14 +94,20 @@ JWT_SECRET,
 );
 
 res.json({token});
+
+}catch(err){
+res.status(500).json({error:"Server error"});
+}
 });
 
 /* ================= AUTH ================= */
 function verifyAdmin(req,res,next){
+
 const auth = req.headers.authorization;
 if(!auth) return res.status(401).json({error:"No token"});
 
 try{
+
 const token = auth.split(" ")[1];
 const decoded = jwt.verify(token,JWT_SECRET);
 
@@ -136,8 +145,23 @@ await product.save();
 res.json({success:true,message:"Product uploaded ✔"});
 });
 
+/* ================= UPDATE / DELETE ================= */
+app.put("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndUpdate(req.params.id,{
+name:req.body.name,
+price:req.body.price
+});
+res.json({message:"Updated ✔"});
+});
+
+app.delete("/product/:id", verifyAdmin, async (req,res)=>{
+await Product.findByIdAndDelete(req.params.id);
+res.json({message:"Deleted ✔"});
+});
+
 /* ================= ORDERS ================= */
 app.post("/order/pay", async (req,res)=>{
+try{
 
 const {items,total,user} = req.body;
 
@@ -154,19 +178,24 @@ status:"Pending"
 
 await order.save();
 
-res.json({success:true,message:"Order saved ✔"});
+res.json({success:true,message:"Order placed ✔"});
+
+}catch(err){
+res.status(500).json({error:"Order failed"});
+}
 });
 
-/* ================= PESAPAL TEST ROUTE (FIXED) ================= */
+/* ================= PESAPAL (REAL READY ROUTE) ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 try{
 
 console.log("🔥 PAYMENT REQUEST:", req.body);
 
-/* TEMP SAFE RESPONSE (no breaking) */
+/* TEMP SAFE RESPONSE (until full IPN setup is added) */
 res.json({
 success:true,
-message:"Pesapal route active ✔ (connect real API next)"
+message:"Pesapal route active ✔",
+note:"Connect full Pesapal redirect next step"
 });
 
 }catch(err){
