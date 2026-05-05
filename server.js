@@ -11,16 +11,16 @@ const app = express();
 
 /* ================= MIDDLEWARE ================= */
 app.use(cors({
-  origin: "*",
-  methods: ["GET","POST","PUT","DELETE"],
-  allowedHeaders: ["Content-Type","Authorization"]
+origin: "*",
+methods: ["GET","POST","PUT","DELETE"],
+allowedHeaders: ["Content-Type","Authorization"]
 }));
 
 app.use(express.json());
 
-/* ================= ROOT (FIXED) ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 MALONE SERVER RUNNING");
+/* ================= ROOT TEST ================= */
+app.get("/", (req,res)=>{
+res.send("🚀 MALONE SERVER RUNNING");
 });
 
 /* ================= ENV ================= */
@@ -96,7 +96,6 @@ res.json({token});
 /* ================= AUTH ================= */
 function verifyAdmin(req,res,next){
 const auth = req.headers.authorization;
-
 if(!auth) return res.status(401).json({error:"No token"});
 
 try{
@@ -120,10 +119,7 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find().sort({_id:-1}));
 });
 
-/* UPLOAD PRODUCT (FIXED RESPONSE) */
 app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
-
-try{
 
 if(!req.file){
 return res.status(400).json({error:"No image uploaded"});
@@ -137,36 +133,11 @@ image:req.file.path
 
 await product.save();
 
-res.json({
-success:true,
-message:"Product uploaded ✔",
-image:req.file.path
-});
-
-}catch(err){
-console.log(err);
-res.status(500).json({error:"Upload failed"});
-}
-});
-
-/* UPDATE */
-app.put("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,{
-name:req.body.name,
-price:req.body.price
-});
-res.json({message:"Updated ✔"});
-});
-
-/* DELETE */
-app.delete("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndDelete(req.params.id);
-res.json({message:"Deleted ✔"});
+res.json({success:true,message:"Product uploaded ✔"});
 });
 
 /* ================= ORDERS ================= */
 app.post("/order/pay", async (req,res)=>{
-try{
 
 const {items,total,user} = req.body;
 
@@ -183,21 +154,35 @@ status:"Pending"
 
 await order.save();
 
-res.json({success:true,message:"Order placed ✔"});
+res.json({success:true,message:"Order saved ✔"});
+});
+
+/* ================= PESAPAL TEST ROUTE (FIXED) ================= */
+app.post("/pesapal/pay", async (req,res)=>{
+try{
+
+console.log("🔥 PAYMENT REQUEST:", req.body);
+
+/* TEMP SAFE RESPONSE (no breaking) */
+res.json({
+success:true,
+message:"Pesapal route active ✔ (connect real API next)"
+});
 
 }catch(err){
 console.log(err);
-res.status(500).json({error:"Order failed"});
+res.status(500).json({error:"Payment failed"});
 }
 });
 
-/* GET ORDERS */
+/* ================= ORDERS ================= */
 app.get("/orders", verifyAdmin, async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 10000;
+
 app.listen(PORT,()=>{
 console.log("🚀 MALONE SERVER RUNNING ON PORT", PORT);
 });
