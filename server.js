@@ -11,20 +11,14 @@ app.use(express.json());
 /* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URL)
 .then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("DB ERROR:", err));
+.catch(err=>console.log(err));
 
-/* ================= TEST ROUTE ================= */
+/* ================= TEST ================= */
 app.get("/", (req,res)=>{
 res.send("🚀 MALONE BACKEND RUNNING");
 });
 
-/* ================= MODELS ================= */
-const Product = mongoose.model("Product",{
-name:String,
-price:Number,
-image:String
-});
-
+/* ================= MODEL ================= */
 const Order = mongoose.model("Order",{
 items:Array,
 total:Number,
@@ -34,64 +28,45 @@ orderTrackingId:String,
 date:{type:Date,default:Date.now}
 });
 
-/* ================= PRODUCTS ================= */
-app.get("/products", async (req,res)=>{
-try{
-const data = await Product.find();
-res.json(data);
-}catch(err){
-res.status(500).json({error:"Products failed"});
-}
+/* ================= IPN ================= */
+app.post("/pesapal/ipn",(req,res)=>{
+console.log("📩 IPN RECEIVED:", req.body);
+res.json({ok:true});
 });
 
-/* ================= ORDERS ================= */
-app.get("/orders", async (req,res)=>{
-try{
-const data = await Order.find().sort({date:-1});
-res.json(data);
-}catch(err){
-res.status(500).json({error:"Orders failed"});
-}
-});
-
-/* ================= CREATE ORDER ================= */
-app.post("/order/pay", async (req,res)=>{
-try{
-
-const order = new Order(req.body);
-await order.save();
-
-res.json({success:true});
-
-}catch(err){
-res.status(500).json({error:"Order error"});
-}
-});
-
-/* ================= PESAPAL ================= */
-
-/* TOKEN */
+/* ================= TOKEN ================= */
 async function getToken(){
+try{
+
 const res = await axios.post(
 `${process.env.PESAPAL_BASE_URL}/api/Auth/RequestToken`,
 {
-consumer_key:process.env.PESAPAL_CONSUMER_KEY,
-consumer_secret:process.env.PESAPAL_CONSUMER_SECRET
+consumer_key: process.env.PESAPAL_CONSUMER_KEY,
+consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
 }
 );
+
+console.log("🔑 TOKEN OK");
 return res.data.token;
+
+}catch(err){
+console.log("❌ TOKEN ERROR:", err.response?.data || err.message);
+throw err;
+}
 }
 
-/* PAY */
+/* ================= PAY ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 
 try{
+
+console.log("🔥 PAYMENT REQUEST:", req.body);
 
 const {amount,items} = req.body;
 
 const token = await getToken();
 
-const orderId = "ORDER_"+Date.now();
+const orderId = "ORDER_" + Date.now();
 
 /* SAVE ORDER */
 await Order.create({
@@ -100,23 +75,26 @@ total:amount,
 orderTrackingId:orderId
 });
 
-/* REQUEST PESAPAL */
-const response = await axios.post(
-`${process.env.PESAPAL_BASE_URL}/api/Transactions/SubmitOrderRequest`,
-{
-id:orderId,
-currency:"KES",
+const payload = {
+id: orderId,
+currency: "KES",
 amount,
-description:"Malone Store Purchase",
-callback_url:"https://yourdomain.com/confirm.html",
-notification_id:process.env.PESAPAL_IPN_ID,
+description: "Malone Store Purchase",
+callback_url: "https://phone-store-backend-9w7p.onrender.com/confirm.html",
+notification_id: process.env.PESAPAL_IPN_ID,
 billing_address:{
 email_address:"customer@email.com",
 phone_number:"0700000000",
 country_code:"KE",
 first_name:"Customer"
 }
-},
+};
+
+console.log("📦 PAYLOAD:", payload);
+
+const response = await axios.post(
+`${process.env.PESAPAL_BASE_URL}/api/Transactions/SubmitOrderRequest`,
+payload,
 {
 headers:{
 Authorization:`Bearer ${token}`
@@ -124,13 +102,21 @@ Authorization:`Bearer ${token}`
 }
 );
 
+console.log("📥 PESAPAL RESPONSE:", response.data);
+
 res.json(response.data);
 
 }catch(err){
-console.log(err.response?.data || err.message);
-res.status(500).json({error:"Payment failed"});
-}
 
+console.log("❌ PAYMENT FAILED:");
+console.log(err.response?.data || err.message);
+
+res.status(500).json({
+error:"Payment failed",
+details: err.response?.data || err.message
+});
+
+}
 });
 
 /* ================= STATUS ================= */
@@ -149,22 +135,16 @@ Authorization:`Bearer ${token}`
 }
 );
 
-if(response.data.payment_status==="COMPLETED"){
-await Order.findOneAndUpdate(
-{orderTrackingId:req.params.id},
-{paymentStatus:"Paid",status:"Processing"}
-);
-}
-
 res.json(response.data);
 
 }catch(err){
+console.log(err.message);
 res.status(500).json({error:"Status error"});
 }
 
 });
 
-/* ================= SERVER ================= */
+/* ================= START ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
