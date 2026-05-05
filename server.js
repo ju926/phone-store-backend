@@ -19,7 +19,7 @@ allowedHeaders: ["Content-Type","Authorization"]
 
 app.use(express.json());
 
-/* ================= ROOT ================= */
+/* ================= HEALTH CHECK ================= */
 app.get("/", (req,res)=>{
 res.send("🚀 MALONE SERVER RUNNING");
 });
@@ -47,6 +47,7 @@ image:String
 });
 
 const Order = mongoose.model("Order",{
+orderId:String,
 userId:String,
 fullName:String,
 email:String,
@@ -102,12 +103,10 @@ res.status(500).json({error:"Server error"});
 
 /* ================= AUTH ================= */
 function verifyAdmin(req,res,next){
-
 const auth = req.headers.authorization;
 if(!auth) return res.status(401).json({error:"No token"});
 
 try{
-
 const token = auth.split(" ")[1];
 const decoded = jwt.verify(token,JWT_SECRET);
 
@@ -145,7 +144,6 @@ await product.save();
 res.json({success:true,message:"Product uploaded ✔"});
 });
 
-/* ================= UPDATE / DELETE ================= */
 app.put("/product/:id", verifyAdmin, async (req,res)=>{
 await Product.findByIdAndUpdate(req.params.id,{
 name:req.body.name,
@@ -166,6 +164,7 @@ try{
 const {items,total,user} = req.body;
 
 const order = new Order({
+orderId:"ORDER_"+Date.now(),
 userId:user?.id || "guest",
 fullName:user?.name || "Guest",
 email:user?.email || "",
@@ -178,38 +177,91 @@ status:"Pending"
 
 await order.save();
 
-res.json({success:true,message:"Order placed ✔"});
+res.json({success:true,message:"Order saved ✔"});
 
 }catch(err){
 res.status(500).json({error:"Order failed"});
 }
 });
 
-/* ================= PESAPAL (REAL READY ROUTE) ================= */
+/* ================= REAL PESAPAL CHECKOUT ================= */
 app.post("/pesapal/pay", async (req,res)=>{
 try{
 
-console.log("🔥 PAYMENT REQUEST:", req.body);
+const {items,total} = req.body;
 
-/* TEMP SAFE RESPONSE (until full IPN setup is added) */
-res.json({
-success:true,
-message:"Pesapal route active ✔",
-note:"Connect full Pesapal redirect next step"
+console.log("🔥 PESAPAL PAYMENT:", total);
+
+/* 1. TOKEN */
+const tokenRes = await axios.post(
+"https://pay.pesapal.com/v3/api/Auth/RequestToken",
+{
+consumer_key: process.env.PESAPAL_CONSUMER_KEY,
+consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
+}
+);
+
+const token = tokenRes.data.token;
+
+/* 2. ORDER */
+const orderId = "ORDER_" + Date.now();
+
+/* 3. PAYLOAD */
+const payload = {
+id: orderId,
+currency: "KES",
+amount: total,
+description: "Phone Store Purchase",
+callback_url: "https://phone-store-backend-9w7p.onrender.com/",
+notification_id: process.env.PESAPAL_IPN_ID,
+billing_address: {
+email_address: "customer@email.com",
+phone_number: "0700000000",
+country_code: "KE",
+first_name: "Customer"
+}
+};
+
+/* 4. REQUEST */
+const response = await axios.post(
+"https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
+payload,
+{
+headers:{
+Authorization:`Bearer ${token}`
+}
+}
+);
+
+/* 5. SAVE ORDER */
+await Order.create({
+orderId,
+items,
+total,
+status:"Pending"
 });
 
+/* 6. RETURN */
+res.json(response.data);
+
 }catch(err){
-console.log(err);
-res.status(500).json({error:"Payment failed"});
+
+console.log("❌ PESAPAL ERROR:", err.response?.data || err.message);
+
+res.status(500).json({
+error:"Payment failed",
+details:err.response?.data || err.message
+});
+
 }
 });
 
-/* ================= ORDERS ================= */
+/* ================= ORDERS LIST ================= */
 app.get("/orders", verifyAdmin, async (req,res)=>{
 res.json(await Order.find().sort({date:-1}));
 });
 
-/* ================= SERVER ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
