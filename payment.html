@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment</title>
+
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#0b1220;
+color:white;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+}
+
+.box{
+width:90%;
+max-width:400px;
+background:#111827;
+padding:20px;
+border-radius:12px;
+box-sizing:border-box;
+}
+
+h2{
+text-align:center;
+margin-bottom:20px;
+}
+
+input{
+width:100%;
+padding:12px;
+margin-bottom:12px;
+border:none;
+border-radius:10px;
+background:#1f2937;
+color:white;
+box-sizing:border-box;
+}
+
+button{
+width:100%;
+padding:14px;
+border:none;
+border-radius:10px;
+background:#2563eb;
+color:white;
+font-weight:bold;
+font-size:16px;
+cursor:pointer;
+}
+
+button:disabled{
+opacity:0.6;
+cursor:not-allowed;
+}
+
+#status{
+margin-top:15px;
+text-align:center;
+color:#cbd5e1;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+
+<h2>💳 Complete Payment</h2>
+
+<input type="number" id="amount" placeholder="Enter Amount">
+
+<button id="payBtn" onclick="payNow()">
+Pay Now
+</button>
+
+<div id="status"></div>
+
+</div>
+
+<script>
+
+const API =
+"https://phone-store-backend-9w7p.onrender.com";
+
+async function payNow(){
+
+const total = Number(
+document.getElementById("amount").value
+);
+
+if(!total || total <= 0){
+alert("Enter valid amount");
+return;
+}
+
+const btn =
+document.getElementById("payBtn");
+
+btn.disabled = true;
+btn.innerText = "Processing...";
+
+document.getElementById("status").innerText =
+"Redirecting to Pesapal...";
+
+try{
+
+const res = await fetch(
+API + "/pesapal/pay",
+{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:JSON.stringify({
+items:[
+{
+name:"Phone Order",
+price:total,
+quantity:1
+}
+],
+total
+})
+}
+);
+
+const data = await res.json();
+
+console.log(data);
+
+if(data.redirect_url){
+
+window.location.href =
+data.redirect_url;
+
+}else{
+
+btn.disabled = false;
+btn.innerText = "Pay Now";
+
+document.getElementById("status").innerText =
+"Payment initialization failed";
+
+}
+
+}catch(err){
+
+console.log(err);
+
+btn.disabled = false;
+btn.innerText = "Pay Now";
+
+document.getElementById("status").innerText =
+"Server error";
+
+}
+
+}
+
+</script>
+
+</body>
+</html>
