@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Failed</title>
+
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#0b1220;
+color:white;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+text-align:center;
+}
+
+.box{
+background:#111827;
+padding:25px;
+border-radius:12px;
+width:90%;
+max-width:400px;
+box-sizing:border-box;
+}
+
+h1{
+color:#ef4444;
+}
+
+p{
+color:#cbd5e1;
+}
+
+button{
+width:100%;
+padding:12px;
+margin-top:15px;
+border:none;
+border-radius:10px;
+background:#2563eb;
+color:white;
+font-weight:bold;
+cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+
+<h1>❌ Payment Failed</h1>
+
+<p>
+Payment was cancelled or unsuccessful.
+</p>
+
+<button onclick="retry()">
+Try Again
+</button>
+
+</div>
+
+<script>
+
+function retry(){
+window.location.href = "payment.html";
+}
+
+</script>
+
+</body>
+  </html>
