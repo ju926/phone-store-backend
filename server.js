@@ -87,10 +87,16 @@ try{
 const {email,password} = req.body;
 
 const admin = await Admin.findOne({email});
-if(!admin) return res.status(400).json({error:"Invalid login"});
+
+if(!admin){
+return res.status(400).json({error:"Invalid login"});
+}
 
 const match = await bcrypt.compare(password,admin.password);
-if(!match) return res.status(400).json({error:"Invalid login"});
+
+if(!match){
+return res.status(400).json({error:"Invalid login"});
+}
 
 const token = jwt.sign(
 {id:admin._id,role:admin.role},
@@ -107,11 +113,17 @@ res.status(500).json({error:"Server error"});
 
 /* ================= AUTH ================= */
 function verifyAdmin(req,res,next){
+
 const auth = req.headers.authorization;
-if(!auth) return res.status(401).json({error:"No token"});
+
+if(!auth){
+return res.status(401).json({error:"No token"});
+}
 
 try{
+
 const token = auth.split(" ")[1];
+
 const decoded = jwt.verify(token,JWT_SECRET);
 
 if(decoded.role !== "admin"){
@@ -119,11 +131,13 @@ return res.status(403).json({error:"Forbidden"});
 }
 
 req.admin = decoded;
+
 next();
 
 }catch(err){
 res.status(401).json({error:"Invalid token"});
 }
+
 }
 
 /* ================= PRODUCTS ================= */
@@ -131,10 +145,19 @@ app.get("/products", async (req,res)=>{
 res.json(await Product.find().sort({_id:-1}));
 });
 
-app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
+/* UPLOAD PRODUCT */
+app.post(
+"/products",
+verifyAdmin,
+upload.single("image"),
+async (req,res)=>{
+
+try{
 
 if(!req.file){
-return res.status(400).json({error:"No image uploaded"});
+return res.status(400).json({
+error:"No image uploaded"
+});
 }
 
 const product = new Product({
@@ -145,24 +168,50 @@ image:req.file.path
 
 await product.save();
 
-res.json({success:true,message:"Product uploaded ✔"});
+res.json({
+success:true,
+message:"Product uploaded ✔"
 });
 
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+error:"Upload failed"
+});
+
+}
+
+});
+
+/* UPDATE PRODUCT */
 app.put("/product/:id", verifyAdmin, async (req,res)=>{
-await Product.findByIdAndUpdate(req.params.id,{
+
+await Product.findByIdAndUpdate(
+req.params.id,
+{
 name:req.body.name,
 price:req.body.price
-});
+}
+);
+
 res.json({message:"Updated ✔"});
+
 });
 
+/* DELETE PRODUCT */
 app.delete("/product/:id", verifyAdmin, async (req,res)=>{
+
 await Product.findByIdAndDelete(req.params.id);
+
 res.json({message:"Deleted ✔"});
+
 });
 
 /* ================= ORDERS ================= */
 app.post("/order/pay", async (req,res)=>{
+
 try{
 
 const {items,total,user} = req.body;
@@ -181,15 +230,24 @@ status:"Pending"
 
 await order.save();
 
-res.json({success:true,message:"Order saved ✔"});
+res.json({
+success:true,
+message:"Order saved ✔"
+});
 
 }catch(err){
-res.status(500).json({error:"Order failed"});
+
+res.status(500).json({
+error:"Order failed"
+});
+
 }
+
 });
 
 /* ================= PESAPAL PAYMENT ================= */
 app.post("/pesapal/pay", async (req,res)=>{
+
 try{
 
 const {items,total} = req.body;
@@ -200,8 +258,11 @@ console.log("🔥 PAYMENT:", total);
 const tokenRes = await axios.post(
 "https://pay.pesapal.com/v3/api/Auth/RequestToken",
 {
-consumer_key: process.env.PESAPAL_CONSUMER_KEY,
-consumer_secret: process.env.PESAPAL_CONSUMER_SECRET
+consumer_key:
+process.env.PESAPAL_CONSUMER_KEY,
+
+consumer_secret:
+process.env.PESAPAL_CONSUMER_SECRET
 }
 );
 
@@ -210,17 +271,23 @@ const token = tokenRes.data.token;
 /* ORDER ID */
 const orderId = "ORDER_" + Date.now();
 
-/* PAYLOAD */
+/* PAYMENT PAYLOAD */
 const payload = {
+
 id: orderId,
+
 currency: "KES",
+
 amount: total,
+
 description: "Malone Store Purchase",
 
-/* 🔥 FIXED CALLBACK (IMPORTANT) */
-callback_url: "https://phone-store-backend-9w7p.onrender.com/confirm.html",
+/* IMPORTANT */
+callback_url:
+"https://phone-store-backend-9w7p.onrender.com/payment-status",
 
-notification_id: process.env.PESAPAL_IPN_ID,
+notification_id:
+process.env.PESAPAL_IPN_ID,
 
 billing_address:{
 email_address:"customer@email.com",
@@ -228,9 +295,10 @@ phone_number:"0700000000",
 country_code:"KE",
 first_name:"Customer"
 }
+
 };
 
-/* REQUEST */
+/* SEND REQUEST */
 const response = await axios.post(
 "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
 payload,
@@ -249,12 +317,15 @@ total,
 status:"Pending"
 });
 
-/* RETURN */
+/* RETURN RESPONSE */
 res.json(response.data);
 
 }catch(err){
 
-console.log("❌ PESAPAL ERROR:", err.response?.data || err.message);
+console.log(
+"❌ PESAPAL ERROR:",
+err.response?.data || err.message
+);
 
 res.status(500).json({
 error:"Payment failed",
@@ -262,25 +333,117 @@ details:err.response?.data || err.message
 });
 
 }
+
 });
 
-/* ================= ROUTES FOR HTML ================= */
+/* ================= VERIFY PAYMENT ================= */
+app.get("/payment-status", async (req,res)=>{
+
+try{
+
+const trackingId =
+req.query.OrderTrackingId;
+
+const orderId =
+req.query.OrderMerchantReference;
+
+if(!trackingId){
+return res.redirect("/failed.html");
+}
+
+/* TOKEN */
+const tokenRes = await axios.post(
+"https://pay.pesapal.com/v3/api/Auth/RequestToken",
+{
+consumer_key:
+process.env.PESAPAL_CONSUMER_KEY,
+
+consumer_secret:
+process.env.PESAPAL_CONSUMER_SECRET
+}
+);
+
+const token = tokenRes.data.token;
+
+/* VERIFY */
+const statusRes = await axios.get(
+`https://pay.pesapal.com/v3/api/Transactions/GetTransactionStatus?orderTrackingId=${trackingId}`,
+{
+headers:{
+Authorization:`Bearer ${token}`
+}
+}
+);
+
+console.log(
+"PAYMENT STATUS:",
+statusRes.data
+);
+
+const paymentStatus =
+statusRes.data.payment_status_description;
+
+/* SUCCESS */
+if(paymentStatus === "Completed"){
+
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Paid"}
+);
+
+return res.redirect(
+`/confirm.html?orderId=${orderId}&trackingId=${trackingId}`
+);
+
+}
+
+/* FAILED */
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Failed"}
+);
+
+return res.redirect("/failed.html");
+
+}catch(err){
+
+console.log(
+"VERIFY ERROR:",
+err.response?.data || err.message
+);
+
+return res.redirect("/failed.html");
+
+}
+
+});
+
+/* ================= HTML ROUTES ================= */
 app.get("/confirm.html", (req,res)=>{
-res.sendFile(path.join(__dirname,"confirm.html"));
+res.sendFile(
+path.join(__dirname,"confirm.html")
+);
 });
 
 app.get("/failed.html", (req,res)=>{
-res.sendFile(path.join(__dirname,"failed.html"));
+res.sendFile(
+path.join(__dirname,"failed.html")
+);
 });
 
 /* ================= ORDERS ================= */
 app.get("/orders", verifyAdmin, async (req,res)=>{
-res.json(await Order.find().sort({date:-1}));
+res.json(
+await Order.find().sort({date:-1})
+);
 });
 
-/* ================= START ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log("🚀 MALONE SERVER RUNNING ON PORT", PORT);
+console.log(
+"🚀 MALONE SERVER RUNNING ON PORT",
+PORT
+);
 });
