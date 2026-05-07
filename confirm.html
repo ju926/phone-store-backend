@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Successful</title>
+
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#0b1220;
+color:white;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+text-align:center;
+}
+
+.box{
+background:#111827;
+padding:25px;
+border-radius:12px;
+width:90%;
+max-width:400px;
+box-sizing:border-box;
+}
+
+h1{
+color:#22c55e;
+}
+
+p{
+color:#cbd5e1;
+word-break:break-all;
+}
+
+button{
+width:100%;
+padding:12px;
+margin-top:15px;
+border:none;
+border-radius:10px;
+background:#2563eb;
+color:white;
+font-weight:bold;
+cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+
+<h1>✅ Payment Successful</h1>
+
+<p id="details"></p>
+
+<button onclick="home()">
+Back To Store
+</button>
+
+</div>
+
+<script>
+
+const params =
+new URLSearchParams(window.location.search);
+
+const orderId =
+params.get("orderId");
+
+const trackingId =
+params.get("trackingId");
+
+document.getElementById("details").innerHTML = `
+<strong>Order ID:</strong><br>
+${orderId}
+<br><br>
+
+<strong>Tracking ID:</strong><br>
+${trackingId}
+`;
+
+function home(){
+window.location.href = "index.html";
+}
+
+</script>
+
+</body>
+</html>
