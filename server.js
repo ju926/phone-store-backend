@@ -1,220 +1,139 @@
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const axios = require("axios");
-const path = require("path");
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SasaPay Payment</title>
 
-const app = express();
-
-/* ================= MIDDLEWARE ================= */
-app.use(cors({ origin:"*" }));
-app.use(express.json());
-app.use(express.static(__dirname));
-
-/* ================= HEALTH ================= */
-app.get("/",(req,res)=>{
-res.send("🚀 SERVER RUNNING");
-});
-
-/* ================= DATABASE ================= */
-mongoose.connect(process.env.MONGO_URL)
-.then(()=>console.log("MongoDB Connected ✔"))
-.catch(err=>console.log("DB ERROR:", err));
-
-/* ================= MODEL ================= */
-const Order = mongoose.model("Order",{
-orderId:String,
-phone:String,
-items:Array,
-total:Number,
-status:{
-type:String,
-default:"Pending"
-},
-date:{
-type:Date,
-default:Date.now
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#0b1220;
+color:white;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
 }
-});
 
-/* ================= SASAPAY PAYMENT ================= */
-app.post("/sasapay/pay", async (req,res)=>{
+.box{
+width:90%;
+max-width:400px;
+background:#111827;
+padding:20px;
+border-radius:12px;
+}
+
+input{
+width:100%;
+padding:12px;
+margin-bottom:12px;
+border:none;
+border-radius:10px;
+background:#1f2937;
+color:white;
+}
+
+button{
+width:100%;
+padding:14px;
+border:none;
+border-radius:10px;
+background:#22c55e;
+color:white;
+font-weight:bold;
+cursor:pointer;
+}
+
+#logs{
+margin-top:15px;
+background:#0f172a;
+padding:10px;
+border-radius:10px;
+height:160px;
+overflow:auto;
+font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+
+<h2>💳 SasaPay Checkout</h2>
+
+<input id="amount" type="number" placeholder="Amount">
+<input id="phone" type="text" placeholder="2547XXXXXXXX">
+
+<button id="payBtn" onclick="payNow()">Pay Now</button>
+
+<div id="logs"></div>
+
+</div>
+
+<script>
+
+const API = "https://phone-store-backend-9w7p.onrender.com";
+
+function log(msg){
+const box = document.getElementById("logs");
+const time = new Date().toLocaleTimeString();
+box.innerHTML += `[${time}] ${msg}<br>`;
+box.scrollTop = box.scrollHeight;
+console.log(msg);
+}
+
+async function payNow(){
+
+const amount = Number(document.getElementById("amount").value);
+const phone = document.getElementById("phone").value;
+
+if(!amount || amount <= 0){
+alert("Invalid amount");
+return;
+}
+
+if(!phone){
+alert("Enter phone");
+return;
+}
+
+log("🚀 Sending payment request...");
 
 try{
 
-const {phone,total,items} = req.body;
-
-console.log("🚀 PAYMENT START");
-console.log("📱 Phone:", phone);
-console.log("💰 Amount:", total);
-
-/* ================= TOKEN ================= */
-const tokenRes = await axios({
-method:"POST",
-url:"https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
-auth:{
-username: process.env.SASAPAY_CLIENT_ID,
-password: process.env.SASAPAY_CLIENT_SECRET
+const res = await fetch(API + "/sasapay/pay", {
+method: "POST",
+headers: {
+"Content-Type": "application/json"
 },
-headers:{
-"Content-Type":"application/json"
-}
-});
-
-console.log("🔑 TOKEN:", tokenRes.data);
-
-const token =
-tokenRes.data.access_token ||
-tokenRes.data.token;
-
-if(!token){
-throw new Error("No token received");
-}
-
-/* ================= ORDER ID ================= */
-const orderId =
-"ORDER_" + Date.now();
-
-/* ================= PAYMENT REQUEST ================= */
-const paymentRes = await axios({
-
-method:"POST",
-
-url:"https://sandbox.sasapay.app/api/v1/payments/merchant/request-payment/",
-
-data:{
-
-MerchantCode:
-process.env.SASAPAY_MERCHANT_CODE,
-
-NetworkCode:"63902",
-
-PhoneNumber:phone,
-
-TransactionReference:orderId,
-
-AccountReference:orderId,
-
-Currency:"KES",
-
-Amount:total,
-
-TransactionDesc:"Phone Store Payment",
-
-CallBackURL:
-"https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
-
-},
-
-headers:{
-Authorization:`Bearer ${token}`,
-"Content-Type":"application/json"
-}
-
-});
-
-console.log(
-"💳 PAYMENT RESPONSE:",
-paymentRes.data
-);
-
-/* ================= SAVE ORDER ================= */
-await Order.create({
-orderId,
+body: JSON.stringify({
 phone,
-items,
-total,
-status:"Pending"
+total: amount,
+items:[{ name:"Phone", price:amount, quantity:1 }]
+})
 });
 
-/* ================= RESPONSE ================= */
-return res.json({
-success:true,
-data:paymentRes.data
-});
+const data = await res.json();
+
+log("📥 RESPONSE:");
+log(JSON.stringify(data, null, 2));
+
+if(data.success){
+log("✔ Payment initiated");
+alert("Check your phone for STK push");
+}else{
+log("❌ Payment failed");
+}
 
 }catch(err){
-
-console.log("🔥 SASAPAY ERROR:");
-
-console.log(
-err.response?.data || err.message
-);
-
-return res.status(500).json({
-error:"Payment failed",
-details:
-err.response?.data || err.message
-});
+log("🔥 ERROR: " + err.message);
+}
 
 }
 
-});
+</script>
 
-/* ================= CALLBACK ================= */
-app.post("/sasapay/callback", async (req,res)=>{
-
-try{
-
-console.log("📩 CALLBACK:", req.body);
-
-const status =
-req.body?.status;
-
-const orderId =
-req.body?.TransactionReference;
-
-if(status === "Success"){
-
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Paid"}
-);
-
-return res.redirect(
-"/confirm.html?orderId="+orderId
-);
-
-}
-
-/* FAILED */
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Failed"}
-);
-
-return res.redirect("/failed.html");
-
-}catch(err){
-
-console.log("CALLBACK ERROR:", err);
-
-return res.redirect("/failed.html");
-
-}
-
-});
-
-/* ================= HTML ROUTES ================= */
-app.get("/confirm.html",(req,res)=>{
-res.sendFile(
-path.join(__dirname,"confirm.html")
-);
-});
-
-app.get("/failed.html",(req,res)=>{
-res.sendFile(
-path.join(__dirname,"failed.html")
-);
-});
-
-/* ================= START ================= */
-const PORT =
-process.env.PORT || 10000;
-
-app.listen(PORT,()=>{
-console.log(
-"🚀 SERVER RUNNING ON PORT",
-PORT
-);
-});
+</body>
+</html>
