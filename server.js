@@ -6,196 +6,163 @@ const path = require("path");
 
 const app = express();
 
-/* ================= MIDDLEWARE ================= */
-app.use(cors({ origin: "*" }));
+app.use(cors({ origin:"*" }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-/* ================= HEALTH CHECK ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 SERVER RUNNING SUCCESSFULLY");
-});
-
-/* ================= DATABASE ================= */
+/* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("✔ MongoDB Connected"))
-  .catch(err => console.log("❌ DB ERROR:", err));
+.then(()=>console.log("DB Connected"))
+.catch(err=>console.log(err));
 
-/* ================= ORDER MODEL ================= */
-const Order = mongoose.model("Order", {
-  orderId: String,
-  phone: String,
-  items: Array,
-  total: Number,
-  status: { type: String, default: "Pending" },
-  date: { type: Date, default: Date.now }
+const Order = mongoose.model("Order",{
+orderId:String,
+phone:String,
+items:Array,
+total:Number,
+status:{type:String,default:"Pending"},
+expiresAt:Date
 });
 
-/* ================= SASAPAY PAYMENT ================= */
-app.post("/sasapay/pay", async (req, res) => {
+/* ================= PAY ================= */
+app.post("/sasapay/pay", async (req,res)=>{
 
-  try {
+try{
 
-    const { phone, total, items } = req.body;
+const {phone,total,items} = req.body;
 
-    console.log("\n🚀 PAYMENT START");
-    console.log("📱 Phone:", phone);
-    console.log("💰 Amount:", total);
+const credentials = Buffer.from(
+`${process.env.SASAPAY_CLIENT_ID}:${process.env.SASAPAY_CLIENT_SECRET}`
+).toString("base64");
 
-    /* ================= TOKEN ================= */
-    const credentials = Buffer.from(
-      `${process.env.SASAPAY_CLIENT_ID}:${process.env.SASAPAY_CLIENT_SECRET}`
-    ).toString("base64");
+const tokenRes = await axios({
+method:"GET",
+url:"https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
+headers:{
+Authorization:`Basic ${credentials}`
+}
+});
 
-    const tokenRes = await axios({
-      method: "GET",
-      url: "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        Accept: "application/json"
-      }
-    });
+const token = tokenRes.data.access_token;
 
-    const token = tokenRes.data.access_token;
+const orderId = "ORDER_"+Date.now();
 
-    if (!token) throw new Error("Token not received");
+/* 10 sec expiry */
+const expiresAt = new Date(Date.now()+10000);
 
-    const orderId = "ORDER_" + Date.now();
+await Order.create({
+orderId,
+phone,
+items,
+total,
+status:"Pending",
+expiresAt
+});
 
-    /* ================= PAYMENT REQUEST ================= */
-    const payload = {
-      MerchantCode: process.env.SASAPAY_MERCHANT_CODE,
-      NetworkCode: "63902",
-      PhoneNumber: phone,
-      TransactionReference: orderId,
-      AccountReference: orderId,
-      Currency: "KES",
-      Amount: total,
-      TransactionDesc: "Secure Checkout Payment",
-      CallBackURL: "https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
-    };
+const payment = await axios({
+method:"POST",
+url:"https://sandbox.sasapay.app/api/v1/payments/request-payment/",
+data:{
+MerchantCode:process.env.SASAPAY_MERCHANT_CODE,
+NetworkCode:"63902",
+PhoneNumber:phone,
+TransactionReference:orderId,
+AccountReference:orderId,
+Currency:"KES",
+Amount:total,
+TransactionDesc:"Checkout",
+CallBackURL:"https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
+},
+headers:{
+Authorization:`Bearer ${token}`,
+"Content-Type":"application/json"
+}
+});
 
-    console.log("📦 PAYMENT PAYLOAD:", payload);
+return res.json({
+success:true,
+orderId,
+data:payment.data
+});
 
-    const paymentRes = await axios({
-      method: "POST",
-      url: "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
-      data: payload,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json"
-      }
-    });
+}catch(err){
 
-    console.log("💳 PAYMENT RESPONSE:", paymentRes.data);
+return res.status(500).json({
+success:false,
+error:err.response?.data || err.message
+});
 
-    /* ================= SAVE ORDER ================= */
-    await Order.create({
-      orderId,
-      phone,
-      items,
-      total,
-      status: "Pending"
-    });
-
-    return res.json({
-      success: true,
-      orderId,
-      data: paymentRes.data
-    });
-
-  } catch (err) {
-
-    console.log("\n🔥 PAYMENT ERROR:");
-
-    console.log("STATUS:", err.response?.status);
-    console.log("DATA:", err.response?.data);
-    console.log("MESSAGE:", err.message);
-
-    return res.status(500).json({
-      success: false,
-      error: "Payment failed",
-      details: err.response?.data || err.message
-    });
-
-  }
+}
 
 });
 
 /* ================= CALLBACK ================= */
-app.post("/sasapay/callback", async (req, res) => {
+app.post("/sasapay/callback",async(req,res)=>{
 
-  try {
+const orderId =
+req.body?.TransactionReference ||
+req.body?.transaction_reference;
 
-    console.log("📩 CALLBACK RECEIVED:", req.body);
+const status = req.body?.status;
 
-    const orderId =
-      req.body?.TransactionReference ||
-      req.body?.transaction_reference;
+if(status==="Success"){
 
-    const status =
-      req.body?.status;
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Paid"}
+);
 
-    if (status === "Success" || status === "SUCCESS") {
+}else{
 
-      await Order.findOneAndUpdate(
-        { orderId },
-        { status: "Paid" }
-      );
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Failed"}
+);
 
-      return res.redirect("/confirm.html?orderId=" + orderId);
-    }
+}
 
-    await Order.findOneAndUpdate(
-      { orderId },
-      { status: "Failed" }
-    );
-
-    return res.redirect("/failed.html");
-
-  } catch (err) {
-    console.log("CALLBACK ERROR:", err);
-    return res.redirect("/failed.html");
-  }
+res.sendStatus(200);
 
 });
 
-/* ================= ORDER STATUS API (FOR FRONTEND POLLING) ================= */
-app.get("/order-status", async (req, res) => {
+/* ================= ORDER STATUS ================= */
+app.get("/order-status",async(req,res)=>{
 
-  try {
+const order = await Order.findOne({
+orderId:req.query.orderId
+});
 
-    const order = await Order.findOne({
-      orderId: req.query.orderId
-    });
+if(!order){
+return res.json({status:"NotFound"});
+}
 
-    if (!order) {
-      return res.json({ status: "NotFound" });
-    }
-
-    return res.json({
-      status: order.status
-    });
-
-  } catch (err) {
-    return res.json({ status: "Error" });
-  }
+res.json({status:order.status});
 
 });
 
-/* ================= FRONTEND ROUTES ================= */
-app.get("/confirm.html", (req, res) => {
-  res.sendFile(path.join(__dirname, "confirm.html"));
+/* ================= AUTO FAIL ================= */
+setInterval(async()=>{
+
+await Order.updateMany(
+{
+status:"Pending",
+expiresAt:{$lt:new Date()}
+},
+{status:"Failed"}
+);
+
+},5000);
+
+/* ================= ROUTES ================= */
+app.get("/confirm.html",(req,res)=>{
+res.sendFile(path.join(__dirname,"confirm.html"));
 });
 
-app.get("/failed.html", (req, res) => {
-  res.sendFile(path.join(__dirname, "failed.html"));
+app.get("/failed.html",(req,res)=>{
+res.sendFile(path.join(__dirname,"failed.html"));
 });
 
-/* ================= START SERVER ================= */
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log("🚀 SERVER RUNNING ON PORT", PORT);
+/* ================= START ================= */
+app.listen(10000,()=>{
+console.log("Server running");
 });
