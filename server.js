@@ -21,7 +21,6 @@ mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("✔ MongoDB Connected"))
   .catch(err => console.log("❌ DB ERROR:", err));
 
-/* ================= ORDER MODEL ================= */
 const Order = mongoose.model("Order", {
   orderId: String,
   phone: String,
@@ -42,7 +41,7 @@ app.post("/sasapay/pay", async (req, res) => {
     console.log("📱 Phone:", phone);
     console.log("💰 Amount:", total);
 
-    /* ================= TOKEN REQUEST ================= */
+    /* ================= TOKEN ================= */
     const credentials = Buffer.from(
       `${process.env.SASAPAY_CLIENT_ID}:${process.env.SASAPAY_CLIENT_SECRET}`
     ).toString("base64");
@@ -61,7 +60,7 @@ app.post("/sasapay/pay", async (req, res) => {
     const token = tokenRes.data.access_token;
 
     if (!token) {
-      throw new Error("No access token received");
+      throw new Error("Token not received");
     }
 
     const orderId = "ORDER_" + Date.now();
@@ -83,7 +82,7 @@ app.post("/sasapay/pay", async (req, res) => {
 
     const paymentRes = await axios({
       method: "POST",
-      url: "https://sandbox.sasapay.app/api/v1/payments/merchant/request-payment/",
+      url: "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
       data: payload,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -94,7 +93,6 @@ app.post("/sasapay/pay", async (req, res) => {
 
     console.log("💳 PAYMENT RESPONSE:", paymentRes.data);
 
-    /* ================= SAVE ORDER ================= */
     await Order.create({
       orderId,
       phone,
@@ -159,11 +157,8 @@ app.post("/sasapay/callback", async (req, res) => {
     return res.redirect("/failed.html");
 
   } catch (err) {
-
     console.log("CALLBACK ERROR:", err);
-
     return res.redirect("/failed.html");
-
   }
 
 });
