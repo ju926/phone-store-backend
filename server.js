@@ -6,7 +6,7 @@ const path = require("path");
 
 const app = express();
 
-app.use(cors({origin:"*"}));
+app.use(cors({ origin:"*" }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
@@ -38,40 +38,42 @@ const {phone,total,items} = req.body;
 
 console.log("PAY REQUEST:", {phone,total});
 
-/* ENV CHECK */
+/* CHECK ENV */
 console.log("ENV:", {
 client: process.env.SASAPAY_CLIENT_ID ? "OK" : "MISSING",
 secret: process.env.SASAPAY_CLIENT_SECRET ? "OK" : "MISSING",
 merchant: process.env.SASAPAY_MERCHANT_CODE
 });
 
-/* 1. GET TOKEN */
-const tokenRes = await axios.post(
-"https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
-{},
-{
+/* ================= TOKEN ================= */
+const tokenRes = await axios({
+method:"POST",
+url:"https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
 auth:{
 username: process.env.SASAPAY_CLIENT_ID,
 password: process.env.SASAPAY_CLIENT_SECRET
+},
+headers:{
+"Content-Type":"application/json"
 }
-}
-);
+});
 
-console.log("TOKEN:", tokenRes.data);
+console.log("TOKEN RESPONSE:", tokenRes.data);
 
 const token = tokenRes.data.access_token;
 
 if(!token){
-throw new Error("No token received");
+throw new Error("Token not received");
 }
 
-/* 2. ORDER ID */
+/* ================= ORDER ================= */
 const orderId = "ORDER_" + Date.now();
 
-/* 3. PAYMENT REQUEST */
-const payment = await axios.post(
-"https://sandbox.sasapay.app/api/v1/payments/request-payment/",
-{
+/* ================= PAYMENT REQUEST ================= */
+const payment = await axios({
+method:"POST",
+url:"https://sandbox.sasapay.app/api/v1/payments/payments/",
+data:{
 MerchantCode: process.env.SASAPAY_MERCHANT_CODE,
 PhoneNumber: phone,
 Amount: total,
@@ -79,12 +81,11 @@ Currency: "KES",
 TransactionReference: orderId,
 CallBackURL: "https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
 },
-{
 headers:{
-Authorization:`Bearer ${token}`
+Authorization:`Bearer ${token}`,
+"Content-Type":"application/json"
 }
-}
-);
+});
 
 console.log("PAYMENT RESPONSE:", payment.data);
 
@@ -109,7 +110,7 @@ console.log(err.response?.data || err.message);
 
 res.status(500).json({
 error:"Payment failed",
-details: err.response?.data || err.message
+details:err.response?.data || err.message
 });
 
 }
@@ -147,7 +148,6 @@ return res.redirect("/failed.html");
 }catch(err){
 
 console.log(err);
-
 return res.redirect("/failed.html");
 
 }
