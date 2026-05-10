@@ -23,7 +23,7 @@ app.use(express.json());
 /* ================= STATIC FILES ================= */
 app.use(express.static(__dirname));
 
-/* ================= HEALTH CHECK ================= */
+/* ================= HEALTH ================= */
 app.get("/", (req,res)=>{
 res.send("🚀 MALONE SERVER RUNNING");
 });
@@ -87,16 +87,10 @@ try{
 const {email,password} = req.body;
 
 const admin = await Admin.findOne({email});
-
-if(!admin){
-return res.status(400).json({error:"Invalid login"});
-}
+if(!admin) return res.status(400).json({error:"Invalid login"});
 
 const match = await bcrypt.compare(password,admin.password);
-
-if(!match){
-return res.status(400).json({error:"Invalid login"});
-}
+if(!match) return res.status(400).json({error:"Invalid login"});
 
 const token = jwt.sign(
 {id:admin._id,role:admin.role},
@@ -115,15 +109,11 @@ res.status(500).json({error:"Server error"});
 function verifyAdmin(req,res,next){
 
 const auth = req.headers.authorization;
-
-if(!auth){
-return res.status(401).json({error:"No token"});
-}
+if(!auth) return res.status(401).json({error:"No token"});
 
 try{
 
 const token = auth.split(" ")[1];
-
 const decoded = jwt.verify(token,JWT_SECRET);
 
 if(decoded.role !== "admin"){
@@ -131,7 +121,6 @@ return res.status(403).json({error:"Forbidden"});
 }
 
 req.admin = decoded;
-
 next();
 
 }catch(err){
@@ -146,18 +135,12 @@ res.json(await Product.find().sort({_id:-1}));
 });
 
 /* UPLOAD PRODUCT */
-app.post(
-"/products",
-verifyAdmin,
-upload.single("image"),
-async (req,res)=>{
+app.post("/products", verifyAdmin, upload.single("image"), async (req,res)=>{
 
 try{
 
 if(!req.file){
-return res.status(400).json({
-error:"No image uploaded"
-});
+return res.status(400).json({error:"No image uploaded"});
 }
 
 const product = new Product({
@@ -168,45 +151,27 @@ image:req.file.path
 
 await product.save();
 
-res.json({
-success:true,
-message:"Product uploaded ✔"
-});
+res.json({success:true,message:"Product uploaded ✔"});
 
 }catch(err){
-
-console.log(err);
-
-res.status(500).json({
-error:"Upload failed"
-});
-
+res.status(500).json({error:"Upload failed"});
 }
 
 });
 
 /* UPDATE PRODUCT */
 app.put("/product/:id", verifyAdmin, async (req,res)=>{
-
-await Product.findByIdAndUpdate(
-req.params.id,
-{
+await Product.findByIdAndUpdate(req.params.id,{
 name:req.body.name,
 price:req.body.price
-}
-);
-
+});
 res.json({message:"Updated ✔"});
-
 });
 
 /* DELETE PRODUCT */
 app.delete("/product/:id", verifyAdmin, async (req,res)=>{
-
 await Product.findByIdAndDelete(req.params.id);
-
 res.json({message:"Deleted ✔"});
-
 });
 
 /* ================= ORDERS ================= */
@@ -216,7 +181,7 @@ try{
 
 const {items,total,user} = req.body;
 
-const order = new Order({
+const order = await Order.create({
 orderId:"ORDER_"+Date.now(),
 userId:user?.id || "guest",
 fullName:user?.name || "Guest",
@@ -228,80 +193,53 @@ total,
 status:"Pending"
 });
 
-await order.save();
-
 res.json({
 success:true,
-message:"Order saved ✔"
+message:"Order saved ✔",
+orderId:order.orderId
 });
 
 }catch(err){
-
-res.status(500).json({
-error:"Order failed"
-});
-
+res.status(500).json({error:"Order failed"});
 }
 
 });
 
-/* ================= PESAPAL PAYMENT ================= */
-app.post("/pesapal/pay", async (req,res)=>{
+/* ================= SASAPAY PAYMENT ================= */
+app.post("/sasapay/pay", async (req,res)=>{
 
 try{
 
-const {items,total} = req.body;
+const {items,total,phone} = req.body;
 
-console.log("🔥 PAYMENT:", total);
-
-/* TOKEN */
+/* 1. GET TOKEN */
 const tokenRes = await axios.post(
-"https://pay.pesapal.com/v3/api/Auth/RequestToken",
+"https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
+{},
 {
-consumer_key:
-process.env.PESAPAL_CONSUMER_KEY,
-
-consumer_secret:
-process.env.PESAPAL_CONSUMER_SECRET
+auth:{
+username: process.env.SASAPAY_CLIENT_ID,
+password: process.env.SASAPAY_CLIENT_SECRET
+}
 }
 );
 
-const token = tokenRes.data.token;
+const token = tokenRes.data.access_token;
 
-/* ORDER ID */
+/* 2. ORDER ID */
 const orderId = "ORDER_" + Date.now();
 
-/* PAYMENT PAYLOAD */
-const payload = {
-
-id: orderId,
-
-currency: "KES",
-
-amount: total,
-
-description: "Malone Store Purchase",
-
-/* IMPORTANT */
-callback_url:
-"https://phone-store-backend-9w7p.onrender.com/payment-status",
-
-notification_id:
-process.env.PESAPAL_IPN_ID,
-
-billing_address:{
-email_address:"customer@email.com",
-phone_number:"0700000000",
-country_code:"KE",
-first_name:"Customer"
-}
-
-};
-
-/* SEND REQUEST */
+/* 3. PAYMENT REQUEST */
 const response = await axios.post(
-"https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
-payload,
+"https://sandbox.sasapay.app/api/v1/payments/request-payment/",
+{
+MerchantCode: process.env.SASAPAY_MERCHANT_CODE,
+PhoneNumber: phone,
+Amount: total,
+Currency: "KES",
+TransactionReference: orderId,
+CallBackURL: "https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
+},
 {
 headers:{
 Authorization:`Bearer ${token}`
@@ -309,82 +247,45 @@ Authorization:`Bearer ${token}`
 }
 );
 
-/* SAVE ORDER */
+/* 4. SAVE ORDER */
 await Order.create({
 orderId,
 items,
 total,
+phone,
 status:"Pending"
 });
 
-/* RETURN RESPONSE */
-res.json(response.data);
+res.json({
+success:true,
+message:"Payment initiated ✔",
+data:response.data
+});
 
 }catch(err){
 
-console.log(
-"❌ PESAPAL ERROR:",
-err.response?.data || err.message
-);
+console.log("SASAPAY ERROR:", err.response?.data || err.message);
 
 res.status(500).json({
-error:"Payment failed",
-details:err.response?.data || err.message
+error:"Payment failed"
 });
 
 }
 
 });
 
-/* ================= VERIFY PAYMENT ================= */
-app.get("/payment-status", async (req,res)=>{
+/* ================= SASAPAY CALLBACK ================= */
+app.post("/sasapay/callback", async (req,res)=>{
 
 try{
 
-const trackingId =
-req.query.OrderTrackingId;
+console.log("SasaPay Callback:", req.body);
 
-const orderId =
-req.query.OrderMerchantReference;
-
-if(!trackingId){
-return res.redirect("/failed.html");
-}
-
-/* TOKEN */
-const tokenRes = await axios.post(
-"https://pay.pesapal.com/v3/api/Auth/RequestToken",
-{
-consumer_key:
-process.env.PESAPAL_CONSUMER_KEY,
-
-consumer_secret:
-process.env.PESAPAL_CONSUMER_SECRET
-}
-);
-
-const token = tokenRes.data.token;
-
-/* VERIFY */
-const statusRes = await axios.get(
-`https://pay.pesapal.com/v3/api/Transactions/GetTransactionStatus?orderTrackingId=${trackingId}`,
-{
-headers:{
-Authorization:`Bearer ${token}`
-}
-}
-);
-
-console.log(
-"PAYMENT STATUS:",
-statusRes.data
-);
-
-const paymentStatus =
-statusRes.data.payment_status_description;
+const status = req.body?.status;
+const orderId = req.body?.TransactionReference;
 
 /* SUCCESS */
-if(paymentStatus === "Completed"){
+if(status === "Success"){
 
 await Order.findOneAndUpdate(
 {orderId},
@@ -392,7 +293,7 @@ await Order.findOneAndUpdate(
 );
 
 return res.redirect(
-`/confirm.html?orderId=${orderId}&trackingId=${trackingId}`
+`/confirm.html?orderId=${orderId}`
 );
 
 }
@@ -407,10 +308,7 @@ return res.redirect("/failed.html");
 
 }catch(err){
 
-console.log(
-"VERIFY ERROR:",
-err.response?.data || err.message
-);
+console.log("Callback error:", err.message);
 
 return res.redirect("/failed.html");
 
@@ -420,30 +318,21 @@ return res.redirect("/failed.html");
 
 /* ================= HTML ROUTES ================= */
 app.get("/confirm.html", (req,res)=>{
-res.sendFile(
-path.join(__dirname,"confirm.html")
-);
+res.sendFile(path.join(__dirname,"confirm.html"));
 });
 
 app.get("/failed.html", (req,res)=>{
-res.sendFile(
-path.join(__dirname,"failed.html")
-);
+res.sendFile(path.join(__dirname,"failed.html"));
 });
 
 /* ================= ORDERS ================= */
 app.get("/orders", verifyAdmin, async (req,res)=>{
-res.json(
-await Order.find().sort({date:-1})
-);
+res.json(await Order.find().sort({date:-1}));
 });
 
 /* ================= START SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT,()=>{
-console.log(
-"🚀 MALONE SERVER RUNNING ON PORT",
-PORT
-);
+console.log("🚀 MALONE SERVER RUNNING ON PORT", PORT);
 });
