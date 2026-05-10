@@ -1,31 +1,20 @@
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const multer = require("multer");
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const axios = require("axios");
 const path = require("path");
 
 const app = express();
 
-app.use(cors({ origin:"*" }));
+app.use(cors({origin:"*"}));
 app.use(express.json());
 app.use(express.static(__dirname));
-
-/* ================= HEALTH ================= */
-app.get("/", (req,res)=>{
-res.send("🚀 MALONE SERVER RUNNING");
-});
 
 /* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URL)
 .then(()=>console.log("MongoDB Connected ✔"))
 .catch(err=>console.log(err));
 
-/* ================= ORDER MODEL ================= */
 const Order = mongoose.model("Order",{
 orderId:String,
 phone:String,
@@ -35,6 +24,11 @@ status:{type:String,default:"Pending"},
 date:{type:Date,default:Date.now}
 });
 
+/* ================= HEALTH ================= */
+app.get("/",(req,res)=>{
+res.send("🚀 SERVER RUNNING");
+});
+
 /* ================= SASAPAY PAYMENT ================= */
 app.post("/sasapay/pay", async (req,res)=>{
 
@@ -42,7 +36,16 @@ try{
 
 const {phone,total,items} = req.body;
 
-/* GET TOKEN */
+console.log("PAY REQUEST:", {phone,total});
+
+/* ENV CHECK */
+console.log("ENV:", {
+client: process.env.SASAPAY_CLIENT_ID ? "OK" : "MISSING",
+secret: process.env.SASAPAY_CLIENT_SECRET ? "OK" : "MISSING",
+merchant: process.env.SASAPAY_MERCHANT_CODE
+});
+
+/* 1. GET TOKEN */
 const tokenRes = await axios.post(
 "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
 {},
@@ -54,12 +57,18 @@ password: process.env.SASAPAY_CLIENT_SECRET
 }
 );
 
+console.log("TOKEN:", tokenRes.data);
+
 const token = tokenRes.data.access_token;
 
-/* ORDER ID */
+if(!token){
+throw new Error("No token received");
+}
+
+/* 2. ORDER ID */
 const orderId = "ORDER_" + Date.now();
 
-/* PAYMENT REQUEST */
+/* 3. PAYMENT REQUEST */
 const payment = await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
@@ -77,6 +86,8 @@ Authorization:`Bearer ${token}`
 }
 );
 
+console.log("PAYMENT RESPONSE:", payment.data);
+
 /* SAVE ORDER */
 await Order.create({
 orderId,
@@ -93,10 +104,12 @@ data:payment.data
 
 }catch(err){
 
-console.log("SASAPAY ERROR:", err.response?.data || err.message);
+console.log("🔥 SASAPAY ERROR:");
+console.log(err.response?.data || err.message);
 
 res.status(500).json({
-error:"Payment failed"
+error:"Payment failed",
+details: err.response?.data || err.message
 });
 
 }
@@ -108,10 +121,10 @@ app.post("/sasapay/callback", async (req,res)=>{
 
 try{
 
+console.log("CALLBACK:", req.body);
+
 const status = req.body?.status;
 const orderId = req.body?.TransactionReference;
-
-console.log("CALLBACK:", req.body);
 
 if(status === "Success"){
 
