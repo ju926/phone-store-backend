@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -10,6 +12,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(__dirname));
 
 /* ================= DATABASE ================= */
 
@@ -245,9 +248,11 @@ error:err.response?.data || err.message
 
 /* ================= CALLBACK ================= */
 
-app.post("/sasapay/callback",async(req,res)=>{
+app.post("/sasapay/callback", async (req,res)=>{
 
 try{
+
+console.log("📩 CALLBACK:", req.body);
 
 const orderId =
 req.body?.TransactionReference ||
@@ -267,7 +272,7 @@ await Order.findOneAndUpdate(
 {new:true}
 );
 
-/* SEND EMAIL */
+/* EMAIL */
 
 if(order?.email){
 
@@ -279,35 +284,76 @@ to:order.email,
 
 subject:"Payment Successful",
 
-text:`
-Hello,
+html:`
 
-Your payment of KES ${order.total}
-was successful.
+<h2>Payment Successful ✔</h2>
 
-Thank you for shopping with us.
+<p>Hello,</p>
+
+<p>Your payment of
+<b>KES ${order.total}</b>
+was successful.</p>
+
+<p>Thank you for shopping with us.</p>
+
 `
 
 });
 
 }
 
-}else{
-
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Failed"}
+return res.redirect(
+"/confirm.html?orderId=" + orderId
 );
 
 }
 
-res.sendStatus(200);
+/* FAILED */
+
+const order =
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Failed"},
+{new:true}
+);
+
+/* FAILED EMAIL */
+
+if(order?.email){
+
+await transporter.sendMail({
+
+from:process.env.EMAIL_USER,
+
+to:order.email,
+
+subject:"Payment Failed",
+
+html:`
+
+<h2>Payment Failed ❌</h2>
+
+<p>Hello,</p>
+
+<p>Your payment of
+<b>KES ${order.total}</b>
+failed or was cancelled.</p>
+
+<p>Please try again later.</p>
+
+`
+
+});
+
+}
+
+return res.redirect("/failed.html");
 
 }catch(err){
 
 console.log(err);
 
-res.sendStatus(500);
+return res.redirect("/failed.html");
 
 }
 
@@ -337,17 +383,52 @@ status:order.status
 
 setInterval(async()=>{
 
-await Order.updateMany(
-{
+const oldOrders =
+await Order.find({
 status:"Pending",
 date:{
 $lt:new Date(Date.now()-10000)
 }
-},
-{
-status:"Failed"
-}
+});
+
+for(const order of oldOrders){
+
+await Order.findByIdAndUpdate(
+order._id,
+{status:"Failed"}
 );
+
+/* SEND FAILED EMAIL */
+
+if(order.email){
+
+await transporter.sendMail({
+
+from:process.env.EMAIL_USER,
+
+to:order.email,
+
+subject:"Payment Failed",
+
+html:`
+
+<h2>Payment Failed ❌</h2>
+
+<p>Hello,</p>
+
+<p>Your payment of
+<b>KES ${order.total}</b>
+timed out.</p>
+
+<p>Please try again.</p>
+
+`
+
+});
+
+}
+
+}
 
 },5000);
 
