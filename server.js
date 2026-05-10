@@ -61,7 +61,7 @@ headers:{
 }
 });
 
-console.log("🔑 TOKEN RESPONSE:", tokenRes.data);
+console.log("🔑 TOKEN:", tokenRes.data);
 
 const token =
 tokenRes.data.access_token ||
@@ -71,15 +71,16 @@ if(!token){
 throw new Error("No token received");
 }
 
-/* ================= ORDER ================= */
+/* ================= ORDER ID ================= */
 const orderId =
 "ORDER_" + Date.now();
 
 /* ================= PAYMENT REQUEST ================= */
 const paymentRes = await axios({
+
 method:"POST",
 
-url:"https://sandbox.sasapay.app/api/v1/payments/request-payment",
+url:"https://sandbox.sasapay.app/api/v1/payments/merchant/request-payment/",
 
 data:{
 
@@ -92,16 +93,16 @@ PhoneNumber:phone,
 
 TransactionReference:orderId,
 
+AccountReference:orderId,
+
 Currency:"KES",
 
 Amount:total,
 
+TransactionDesc:"Phone Store Payment",
+
 CallBackURL:
-"https://phone-store-backend-9w7p.onrender.com/sasapay/callback",
-
-AccountReference:orderId,
-
-TransactionDesc:"Phone Store Payment"
+"https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
 
 },
 
@@ -109,6 +110,7 @@ headers:{
 Authorization:`Bearer ${token}`,
 "Content-Type":"application/json"
 }
+
 });
 
 console.log(
@@ -134,6 +136,7 @@ data:paymentRes.data
 }catch(err){
 
 console.log("🔥 SASAPAY ERROR:");
+
 console.log(
 err.response?.data || err.message
 );
@@ -192,7 +195,7 @@ return res.redirect("/failed.html");
 
 });
 
-/* ================= HTML ================= */
+/* ================= HTML ROUTES ================= */
 app.get("/confirm.html",(req,res)=>{
 res.sendFile(
 path.join(__dirname,"confirm.html")
