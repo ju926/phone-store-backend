@@ -21,6 +21,7 @@ mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("✔ MongoDB Connected"))
   .catch(err => console.log("❌ DB ERROR:", err));
 
+/* ================= ORDER MODEL ================= */
 const Order = mongoose.model("Order", {
   orderId: String,
   phone: String,
@@ -55,13 +56,9 @@ app.post("/sasapay/pay", async (req, res) => {
       }
     });
 
-    console.log("🔑 TOKEN RESPONSE:", tokenRes.data);
-
     const token = tokenRes.data.access_token;
 
-    if (!token) {
-      throw new Error("Token not received");
-    }
+    if (!token) throw new Error("Token not received");
 
     const orderId = "ORDER_" + Date.now();
 
@@ -74,7 +71,7 @@ app.post("/sasapay/pay", async (req, res) => {
       AccountReference: orderId,
       Currency: "KES",
       Amount: total,
-      TransactionDesc: "Phone Store Payment",
+      TransactionDesc: "Secure Checkout Payment",
       CallBackURL: "https://phone-store-backend-9w7p.onrender.com/sasapay/callback"
     };
 
@@ -93,6 +90,7 @@ app.post("/sasapay/pay", async (req, res) => {
 
     console.log("💳 PAYMENT RESPONSE:", paymentRes.data);
 
+    /* ================= SAVE ORDER ================= */
     await Order.create({
       orderId,
       phone,
@@ -109,7 +107,7 @@ app.post("/sasapay/pay", async (req, res) => {
 
   } catch (err) {
 
-    console.log("\n🔥 SASAPAY ERROR DEBUG:");
+    console.log("\n🔥 PAYMENT ERROR:");
 
     console.log("STATUS:", err.response?.status);
     console.log("DATA:", err.response?.data);
@@ -159,6 +157,29 @@ app.post("/sasapay/callback", async (req, res) => {
   } catch (err) {
     console.log("CALLBACK ERROR:", err);
     return res.redirect("/failed.html");
+  }
+
+});
+
+/* ================= ORDER STATUS API (FOR FRONTEND POLLING) ================= */
+app.get("/order-status", async (req, res) => {
+
+  try {
+
+    const order = await Order.findOne({
+      orderId: req.query.orderId
+    });
+
+    if (!order) {
+      return res.json({ status: "NotFound" });
+    }
+
+    return res.json({
+      status: order.status
+    });
+
+  } catch (err) {
+    return res.json({ status: "Error" });
   }
 
 });
