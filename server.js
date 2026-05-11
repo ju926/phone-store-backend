@@ -5,16 +5,16 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const axios = require("axios");
 const nodemailer = require("nodemailer");
+const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const http = require("http");
 const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-
-const io = new Server(server, {
-cors: { origin: "*" }
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
@@ -26,7 +26,31 @@ mongoose.connect(process.env.MONGO_URL)
 .then(() => console.log("✔ MongoDB Connected"))
 .catch(err => console.log(err));
 
+/* ================= CLOUDINARY ================= */
+cloudinary.config({
+cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+api_key: process.env.CLOUDINARY_API_KEY,
+api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+cloudinary,
+params: {
+folder: "products",
+allowed_formats: ["jpg", "png", "jpeg", "webp"]
+}
+});
+
+const upload = multer({ storage });
+
 /* ================= MODELS ================= */
+const Product = mongoose.model("Product", {
+name: String,
+price: Number,
+image: String,
+date: { type: Date, default: Date.now }
+});
+
 const Order = mongoose.model("Order", {
 orderId: String,
 phone: String,
@@ -46,12 +70,47 @@ pass: process.env.EMAIL_PASS
 }
 });
 
+/* ================= ADMIN ================= */
+const ADMIN_TOKEN = "ADMIN_TOKEN_123";
+
+function verify(req, res, next) {
+if (req.headers.authorization === "Bearer " + ADMIN_TOKEN) return next();
+return res.status(403).json({ error: "Unauthorized" });
+}
+
 /* ================= SOCKET ================= */
 io.on("connection", (socket) => {
-console.log("Client connected:", socket.id);
+console.log("Client connected");
 });
 
-/* ================= SASAPAY PAY ================= */
+/* ================= PRODUCTS ================= */
+app.get("/products", async (req, res) => {
+const products = await Product.find();
+res.json(products);
+});
+
+app.post("/products", verify, upload.single("image"), async (req, res) => {
+const product = await Product.create({
+name: req.body.name,
+price: req.body.price,
+image: req.file.path
+});
+res.json(product);
+});
+
+/* ================= ORDERS ================= */
+app.get("/orders", verify, async (req, res) => {
+const orders = await Order.find().sort({ date: -1 });
+res.json(orders);
+});
+
+/* 🔥 FIXED DELETE ORDER (THIS WAS MISSING) */
+app.delete("/order/:id", verify, async (req, res) => {
+await Order.findByIdAndDelete(req.params.id);
+res.json({ success: true });
+});
+
+/* ================= SASAPAY PAYMENT ================= */
 app.post("/sasapay/pay", async (req, res) => {
 try {
 
@@ -63,9 +122,7 @@ const credentials = Buffer.from(
 
 const tokenRes = await axios.get(
 "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
-{
-headers: { Authorization: `Basic ${credentials}` }
-}
+{ headers: { Authorization: `Basic ${credentials}` } }
 );
 
 const token = tokenRes.data.access_token;
@@ -81,7 +138,6 @@ total,
 status: "Pending"
 });
 
-/* LIVE NEW ORDER */
 io.emit("new-order", order);
 
 await axios.post(
@@ -105,125 +161,93 @@ Authorization: `Bearer ${token}`,
 }
 );
 
-res.json({
-success: true,
-orderId
-});
+res.json({ success: true, orderId });
 
 } catch (err) {
-console.log(err.message);
 res.status(500).json({ success: false });
 }
 });
 
-/* ================= CALLBACK (ENTERPRISE FIXED) ================= */
+/* ================= CALLBACK ================= */
 app.post("/sasapay/callback", async (req, res) => {
 try {
 
-const orderId =
-req.body?.TransactionReference ||
-req.body?.transactionReference ||
-req.body?.transaction_reference ||
-req.body?.OrderID;
+const orderId = req.body.TransactionReference || req.body.transactionReference;
+const statusRaw = (req.body.status || req.body.ResultCode || "").toString();
 
-const statusRaw =
-req.body?.status ||
-req.body?.Status ||
-req.body?.ResultCode;
+let status = "Failed";
 
-const status = (statusRaw || "").toString().toLowerCase();
-
-const order = await Order.findOne({ orderId });
-
-if (!order) return res.sendStatus(200);
-
-/* ================= SUCCESS ================= */
 if (
-status.includes("success") ||
-status.includes("0") ||
-status.includes("completed")
+statusRaw.includes("success") ||
+statusRaw.includes("0") ||
+statusRaw.includes("completed")
 ) {
+status = "Paid";
 
-order.status = "Paid";
-await order.save();
+const order = await Order.findOneAndUpdate(
+{ orderId },
+{ status: "Paid" },
+{ new: true }
+);
 
-/* EMAIL SUCCESS */
-if (order.email) {
+if (order?.email) {
 await transporter.sendMail({
 from: process.env.EMAIL_USER,
 to: order.email,
-subject: "✅ Payment Successful - Malone Store",
-html: `
-<h2 style="color:green">Payment Successful</h2>
-<p><b>Order ID:</b> ${order.orderId}</p>
-<p><b>Amount:</b> KES ${order.total}</p>
-<p>Status: PAID</p>
-`
+subject: "Payment Successful ✔",
+html: `<h2>Payment Successful</h2><p>KES ${order.total}</p>`
 });
 }
 
-/* LIVE UPDATE */
-io.emit("order-update", {
-orderId: order.orderId,
-status: "Paid"
-});
-
+io.emit("order-update", { orderId, status: "Paid" });
 return res.sendStatus(200);
 }
 
-/* ================= FAILED ================= */
+/* FAILED FLOW */
+const order = await Order.findOneAndUpdate(
+{ orderId },
+{ status: "Failed" },
+{ new: true }
+);
 
-order.status = "Failed";
-await order.save();
-
-/* EMAIL FAILED */
-if (order.email) {
+if (order?.email) {
 await transporter.sendMail({
 from: process.env.EMAIL_USER,
 to: order.email,
-subject: "❌ Payment Failed - Malone Store",
-html: `
-<h2 style="color:red">Payment Failed</h2>
-<p><b>Order ID:</b> ${order.orderId}</p>
-<p><b>Amount:</b> KES ${order.total}</p>
-<p>Status: FAILED</p>
-`
+subject: "Payment Failed ❌",
+html: `<h2>Payment Failed</h2><p>Try again.</p>`
 });
 }
 
-/* LIVE UPDATE */
-io.emit("order-update", {
-orderId: order.orderId,
-status: "Failed"
-});
+io.emit("order-update", { orderId, status: "Failed" });
 
-return res.sendStatus(200);
+res.sendStatus(200);
 
 } catch (err) {
-console.log("CALLBACK ERROR:", err);
-return res.sendStatus(500);
+res.sendStatus(500);
 }
 });
 
-/* ================= STATUS API ================= */
+/* ================= STATUS ================= */
 app.get("/order-status", async (req, res) => {
-
 const order = await Order.findOne({ orderId: req.query.orderId });
-
 if (!order) return res.json({ status: "NotFound" });
 
-let status = order.status.toLowerCase();
-
-if (status === "paid") status = "success";
-if (status === "failed") status = "failed";
-
-res.json({ status });
-
+res.json({ status: order.status.toLowerCase() });
 });
 
-/* ================= START SERVER ================= */
-const PORT = process.env.PORT || 10000;
+/* ================= AUTO FAIL ================= */
+setInterval(async () => {
+const timeout = new Date(Date.now() - 2 * 60 * 1000);
 
-server.listen(PORT, () => {
-console.log("🚀 Server running on port", PORT);
+await Order.updateMany(
+{ status: "Pending", date: { $lt: timeout } },
+{ status: "Failed" }
+);
+
+}, 15000);
+
+/* ================= START ================= */
+server.listen(process.env.PORT || 10000, () => {
+console.log("🚀 Server running");
 });
