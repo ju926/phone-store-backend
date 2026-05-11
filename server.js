@@ -11,295 +11,208 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
 
+/* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const FRONTEND =
-"https://ju926.github.io/maloneti";
-
-/* DATABASE */
-
+/* ================= DB ================= */
 mongoose.connect(process.env.MONGO_URL)
-.then(()=>console.log("✔ MongoDB Connected"))
-.catch(err=>console.log(err));
+.then(() => console.log("✔ MongoDB Connected"))
+.catch(err => console.log(err));
 
-/* CLOUDINARY */
-
+/* ================= CLOUDINARY ================= */
 cloudinary.config({
-cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
-api_key:process.env.CLOUDINARY_API_KEY,
-api_secret:process.env.CLOUDINARY_API_SECRET
+cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+api_key: process.env.CLOUDINARY_API_KEY,
+api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 const storage = new CloudinaryStorage({
 cloudinary,
-params:{
-folder:"products",
-allowed_formats:["jpg","png","jpeg","webp"]
+params: {
+folder: "products",
+allowed_formats: ["jpg", "png", "jpeg", "webp"]
 }
 });
 
-const upload = multer({storage});
+const upload = multer({ storage });
 
-/* MODELS */
+/* ================= MODELS ================= */
+const Product = mongoose.model("Product", {
+name: String,
+price: Number,
 
-const Product = mongoose.model("Product",{
-name:String,
-price:Number,
-image:String
+// keep all formats for compatibility
+image: String,
+imageUrl: String,
+photo: String,
+
+date: {
+type: Date,
+default: Date.now
+}
 });
 
-const Order = mongoose.model("Order",{
-orderId:String,
-phone:String,
-email:String,
-items:Array,
-total:Number,
-status:{
-type:String,
-default:"Pending"
+const Order = mongoose.model("Order", {
+orderId: String,
+phone: String,
+email: String,
+items: Array,
+total: Number,
+status: {
+type: String,
+default: "Pending"
 },
-date:{
-type:Date,
-default:Date.now
+date: {
+type: Date,
+default: Date.now
 }
 });
 
-/* EMAIL */
-
-const transporter =
-nodemailer.createTransport({
-
-service:"gmail",
-
-auth:{
-user:process.env.EMAIL_USER,
-pass:process.env.EMAIL_PASS
+/* ================= EMAIL ================= */
+const transporter = nodemailer.createTransport({
+service: "gmail",
+auth: {
+user: process.env.EMAIL_USER,
+pass: process.env.EMAIL_PASS
 }
-
 });
 
-/* ADMIN */
+/* ================= ADMIN AUTH ================= */
+const ADMIN_TOKEN = "ADMIN_TOKEN_123";
 
-const ADMIN_TOKEN =
-"ADMIN_TOKEN_123";
-
-function verify(req,res,next){
-
-if(
-req.headers.authorization ===
-"Bearer " + ADMIN_TOKEN
-){
+function verify(req, res, next) {
+if (req.headers.authorization === "Bearer " + ADMIN_TOKEN) {
 return next();
 }
-
-return res.status(403).json({
-error:"Unauthorized"
-});
-
+return res.status(403).json({ error: "Unauthorized" });
 }
 
-app.post("/admin-login",(req,res)=>{
+/* ================= LOGIN ================= */
+app.post("/admin-login", (req, res) => {
+const { email, password } = req.body;
 
-const {email,password} =
-req.body;
-
-if(
+if (
 email === process.env.ADMIN_EMAIL &&
 password === process.env.ADMIN_PASSWORD
-){
-
-return res.json({
-token:ADMIN_TOKEN
-});
-
+) {
+return res.json({ token: ADMIN_TOKEN });
 }
 
-return res.status(401).json({
-error:"Login failed"
+return res.status(401).json({ error: "Login failed" });
 });
 
+/* ================= PRODUCTS (FIXED IMAGES) ================= */
+app.get("/products", async (req, res) => {
+try {
+const products = await Product.find();
+
+res.json(
+products.map(p => ({
+_id: p._id,
+name: p.name,
+price: p.price,
+
+// FIX: always return image
+image: p.image || p.imageUrl || p.photo || ""
+}))
+);
+
+} catch (err) {
+res.status(500).json({ error: err.message });
+}
 });
 
-/* PRODUCTS */
+/* ================= ADD PRODUCT ================= */
+app.post("/products", verify, upload.single("image"), async (req, res) => {
+try {
 
-app.get("/products", async(req,res)=>{
+const product = await Product.create({
+name: req.body.name,
+price: req.body.price,
 
-res.json(await Product.find());
-
-});
-
-app.post(
-"/products",
-verify,
-upload.single("image"),
-async(req,res)=>{
-
-try{
-
-const product =
-await Product.create({
-
-name:req.body.name,
-price:req.body.price,
-image:req.file.path
-
+// IMPORTANT FIX: store in all fields
+image: req.file.path,
+imageUrl: req.file.path,
+photo: req.file.path
 });
 
 res.json(product);
 
-}catch(err){
-
-res.status(500).json({
-error:err.message
-});
-
+} catch (err) {
+res.status(500).json({ error: err.message });
 }
-
 });
 
-app.put(
-"/product/:id",
-verify,
-async(req,res)=>{
-
-await Product.findByIdAndUpdate(
-req.params.id,
-req.body
-);
-
-res.json({
-success:true
+/* ================= UPDATE PRODUCT ================= */
+app.put("/product/:id", verify, async (req, res) => {
+await Product.findByIdAndUpdate(req.params.id, req.body);
+res.json({ success: true });
 });
 
+/* ================= DELETE PRODUCT ================= */
+app.delete("/product/:id", verify, async (req, res) => {
+await Product.findByIdAndDelete(req.params.id);
+res.json({ success: true });
 });
 
-app.delete(
-"/product/:id",
-verify,
-async(req,res)=>{
-
-await Product.findByIdAndDelete(
-req.params.id
-);
-
-res.json({
-success:true
-});
-
-});
-
-/* ORDERS */
-
-app.get(
-"/orders",
-verify,
-async(req,res)=>{
-
-const orders =
-await Order.find()
-.sort({date:-1});
-
+/* ================= ORDERS ================= */
+app.get("/orders", verify, async (req, res) => {
+const orders = await Order.find().sort({ date: -1 });
 res.json(orders);
-
 });
 
-app.put(
-"/order/:id/paid",
-verify,
-async(req,res)=>{
-
-const order =
-await Order.findByIdAndUpdate(
+/* ================= MANUAL PAID ================= */
+app.put("/order/:id/paid", verify, async (req, res) => {
+const order = await Order.findByIdAndUpdate(
 req.params.id,
-{status:"Paid"},
-{new:true}
+{ status: "Paid" },
+{ new: true }
 );
 
-if(order?.email){
-
+if (order?.email) {
 await transporter.sendMail({
-
-from:process.env.EMAIL_USER,
-
-to:order.email,
-
-subject:"Payment Successful ✔",
-
-html:`
-
-<h2>Payment Successful ✔</h2>
-
-<p>Your payment of
-<b>KES ${order.total}</b>
-was successful.</p>
-
-`
-
+from: process.env.EMAIL_USER,
+to: order.email,
+subject: "Payment Successful ✔",
+html: `<h2>Payment Successful</h2><p>Your payment of KES ${order.total} was successful.</p>`
 });
-
 }
 
-res.json({
-success:true
+res.json({ success: true });
 });
 
+/* ================= DELETE ORDER ================= */
+app.delete("/order/:id", verify, async (req, res) => {
+await Order.findByIdAndDelete(req.params.id);
+res.json({ success: true });
 });
 
-app.delete(
-"/order/:id",
-verify,
-async(req,res)=>{
+/* ================= SASAPAY PAYMENT ================= */
+app.post("/sasapay/pay", async (req, res) => {
+try {
 
-await Order.findByIdAndDelete(
-req.params.id
-);
-
-res.json({
-success:true
-});
-
-});
-
-/* SASAPAY PAYMENT */
-
-app.post("/sasapay/pay", async(req,res)=>{
-
-try{
-
-const {
-phone,
-email,
-total,
-items
-} = req.body;
+const { phone, email, total, items } = req.body;
 
 /* TOKEN */
-
-const credentials =
-Buffer.from(
+const credentials = Buffer.from(
 `${process.env.SASAPAY_CLIENT_ID}:${process.env.SASAPAY_CLIENT_SECRET}`
 ).toString("base64");
 
-const tokenRes =
-await axios.get(
+const tokenRes = await axios.get(
 "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
 {
-headers:{
-Authorization:
-`Basic ${credentials}`
+headers: {
+Authorization: `Basic ${credentials}`
 }
 }
 );
 
-const token =
-tokenRes.data.access_token;
+const token = tokenRes.data.access_token;
 
 /* ORDER */
-
-const orderId =
-"ORDER_" + Date.now();
+const orderId = "ORDER_" + Date.now();
 
 await Order.create({
 orderId,
@@ -307,255 +220,127 @@ phone,
 email,
 items,
 total,
-status:"Pending"
+status: "Pending"
 });
 
-/* PAYMENT */
-
-const paymentRes =
-await axios.post(
+/* PAYMENT REQUEST */
+const paymentRes = await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
-MerchantCode:
-process.env.SASAPAY_MERCHANT_CODE,
-
-NetworkCode:"63902",
-
-PhoneNumber:phone,
-
-TransactionReference:orderId,
-
-AccountReference:orderId,
-
-Currency:"KES",
-
-Amount:total,
-
-TransactionDesc:
-"Phone Store Payment",
-
-CallBackURL:
-process.env.CALLBACK_URL
+MerchantCode: process.env.SASAPAY_MERCHANT_CODE,
+NetworkCode: "63902",
+PhoneNumber: phone,
+TransactionReference: orderId,
+AccountReference: orderId,
+Currency: "KES",
+Amount: total,
+TransactionDesc: "Store Payment",
+CallBackURL: process.env.CALLBACK_URL
 },
 {
-headers:{
-Authorization:`Bearer ${token}`,
-"Content-Type":"application/json"
+headers: {
+Authorization: `Bearer ${token}`,
+"Content-Type": "application/json"
 }
 }
 );
 
 res.json({
-success:true,
+success: true,
 orderId,
-data:paymentRes.data
+data: paymentRes.data
 });
 
-}catch(err){
-
-console.log(
-err.response?.data || err.message
-);
+} catch (err) {
+console.log(err.response?.data || err.message);
 
 res.status(500).json({
-success:false,
-error:
-err.response?.data || err.message
+success: false,
+error: err.response?.data || err.message
 });
-
 }
-
 });
 
-/* CALLBACK */
-
-app.post(
-"/sasapay/callback",
-async(req,res)=>{
-
-try{
+/* ================= CALLBACK ================= */
+app.post("/sasapay/callback", async (req, res) => {
+try {
 
 const orderId =
 req.body?.TransactionReference ||
 req.body?.transaction_reference;
 
-const status =
-req.body?.status;
+const status = req.body?.status;
 
 /* SUCCESS */
+if (status === "Success") {
 
-if(status === "Success"){
-
-const order =
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Paid"},
-{new:true}
+const order = await Order.findOneAndUpdate(
+{ orderId },
+{ status: "Paid" },
+{ new: true }
 );
 
-if(order?.email){
-
+if (order?.email) {
 await transporter.sendMail({
-
-from:process.env.EMAIL_USER,
-
-to:order.email,
-
-subject:"Payment Successful ✔",
-
-html:`
-
-<h2>Payment Successful ✔</h2>
-
-<p>Your payment of
-<b>KES ${order.total}</b>
-was successful.</p>
-
-`
-
+from: process.env.EMAIL_USER,
+to: order.email,
+subject: "Payment Successful ✔",
+html: `<h2>Payment Successful</h2><p>KES ${order.total}</p>`
 });
-
 }
 
-return res.redirect(
-FRONTEND + "/confirm.html"
-);
-
+return res.redirect(process.env.FRONTEND + "/confirm.html");
 }
 
 /* FAILED */
-
-const order =
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Failed"},
-{new:true}
+const order = await Order.findOneAndUpdate(
+{ orderId },
+{ status: "Failed" },
+{ new: true }
 );
 
-if(order?.email){
-
+if (order?.email) {
 await transporter.sendMail({
-
-from:process.env.EMAIL_USER,
-
-to:order.email,
-
-subject:"Payment Failed ❌",
-
-html:`
-
-<h2>Payment Failed ❌</h2>
-
-<p>Your payment failed
-or timed out.</p>
-
-`
-
+from: process.env.EMAIL_USER,
+to: order.email,
+subject: "Payment Failed ❌",
+html: `<h2>Payment Failed</h2><p>Please try again.</p>`
 });
-
 }
 
-return res.redirect(
-FRONTEND + "/failed.html"
-);
+return res.redirect(process.env.FRONTEND + "/failed.html");
 
-}catch(err){
-
+} catch (err) {
 console.log(err);
+return res.redirect(process.env.FRONTEND + "/failed.html");
+}
+});
 
-return res.redirect(
-FRONTEND + "/failed.html"
+/* ================= ORDER STATUS ================= */
+app.get("/order-status", async (req, res) => {
+const order = await Order.findOne({ orderId: req.query.orderId });
+
+if (!order) {
+return res.json({ status: "NotFound" });
+}
+
+res.json({ status: order.status });
+});
+
+/* ================= AUTO FAIL (10 SEC) ================= */
+setInterval(async () => {
+await Order.updateMany(
+{
+status: "Pending",
+date: { $lt: new Date(Date.now() - 10000) }
+},
+{ status: "Failed" }
 );
+}, 5000);
 
-}
+/* ================= START ================= */
+const PORT = process.env.PORT || 10000;
 
-});
-
-/* STATUS */
-
-app.get(
-"/order-status",
-async(req,res)=>{
-
-const order =
-await Order.findOne({
-orderId:req.query.orderId
-});
-
-if(!order){
-
-return res.json({
-status:"NotFound"
-});
-
-}
-
-res.json({
-status:order.status
-});
-
-});
-
-/* AUTO FAIL */
-
-setInterval(async()=>{
-
-const orders =
-await Order.find({
-
-status:"Pending",
-
-date:{
-$lt:new Date(
-Date.now()-10000
-)
-}
-
-});
-
-for(const order of orders){
-
-await Order.findByIdAndUpdate(
-order._id,
-{status:"Failed"}
-);
-
-if(order.email){
-
-await transporter.sendMail({
-
-from:process.env.EMAIL_USER,
-
-to:order.email,
-
-subject:"Payment Failed ❌",
-
-html:`
-
-<h2>Payment Failed ❌</h2>
-
-<p>Your payment timed out.</p>
-
-`
-
-});
-
-}
-
-}
-
-},5000);
-
-/* START */
-
-const PORT =
-process.env.PORT || 10000;
-
-app.listen(PORT,()=>{
-
-console.log(
-"🚀 Server Running On Port",
-PORT
-);
-
+app.listen(PORT, () => {
+console.log("🚀 Server running on port", PORT);
 });
