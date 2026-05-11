@@ -120,8 +120,6 @@ error:"Login failed"
 
 /* ================= PRODUCTS ================= */
 
-/* GET PRODUCTS */
-
 app.get("/products", async(req,res)=>{
 
 const products =
@@ -130,8 +128,6 @@ await Product.find();
 res.json(products);
 
 });
-
-/* ADD PRODUCT */
 
 app.post(
 "/products",
@@ -164,8 +160,6 @@ error:err.message
 
 });
 
-/* UPDATE PRODUCT */
-
 app.put(
 "/product/:id",
 verify,
@@ -181,8 +175,6 @@ success:true
 });
 
 });
-
-/* DELETE PRODUCT */
 
 app.delete(
 "/product/:id",
@@ -211,8 +203,6 @@ res.json(orders);
 
 });
 
-/* MANUAL PAID BUTTON */
-
 app.put(
 "/order/:id/paid",
 verify,
@@ -225,7 +215,7 @@ req.params.id,
 {new:true}
 );
 
-/* SEND SUCCESS EMAIL */
+/* EMAIL */
 
 if(order?.email){
 
@@ -241,19 +231,32 @@ html:`
 
 <h2>Payment Successful</h2>
 
-<p>Hello,</p>
-
 <p>Your payment of
 <b>KES ${order.total}</b>
 was successful.</p>
-
-<p>Thank you for shopping with us.</p>
 
 `
 
 });
 
 }
+
+res.json({
+success:true
+});
+
+});
+
+/* DELETE ORDER */
+
+app.delete(
+"/order/:id",
+verify,
+async(req,res)=>{
+
+await Order.findByIdAndDelete(
+req.params.id
+);
 
 res.json({
 success:true
@@ -367,8 +370,6 @@ app.post("/sasapay/callback", async(req,res)=>{
 
 try{
 
-console.log("📩 CALLBACK:", req.body);
-
 const orderId =
 req.body?.TransactionReference ||
 req.body?.transaction_reference;
@@ -403,13 +404,9 @@ html:`
 
 <h2>Payment Successful ✔</h2>
 
-<p>Hello,</p>
-
 <p>Your payment of
 <b>KES ${order.total}</b>
 was successful.</p>
-
-<p>Thank you for shopping with us.</p>
 
 `
 
@@ -419,8 +416,7 @@ was successful.</p>
 
 return res.redirect(
 FRONTEND +
-"/confirm.html?orderId=" +
-orderId
+"/confirm.html"
 );
 
 }
@@ -450,13 +446,8 @@ html:`
 
 <h2>Payment Failed ❌</h2>
 
-<p>Hello,</p>
-
-<p>Your payment of
-<b>KES ${order.total}</b>
-failed or was cancelled.</p>
-
-<p>Please try again later.</p>
+<p>Your payment failed
+or was cancelled.</p>
 
 `
 
@@ -465,7 +456,8 @@ failed or was cancelled.</p>
 }
 
 return res.redirect(
-FRONTEND + "/failed.html"
+FRONTEND +
+"/failed.html"
 );
 
 }catch(err){
@@ -473,14 +465,15 @@ FRONTEND + "/failed.html"
 console.log(err);
 
 return res.redirect(
-FRONTEND + "/failed.html"
+FRONTEND +
+"/failed.html"
 );
 
 }
 
 });
 
-/* ================= ORDER STATUS ================= */
+/* ================= STATUS ================= */
 
 app.get("/order-status", async(req,res)=>{
 
@@ -524,7 +517,7 @@ order._id,
 {status:"Failed"}
 );
 
-/* SEND FAILED EMAIL */
+/* EMAIL */
 
 if(order.email){
 
@@ -540,13 +533,7 @@ html:`
 
 <h2>Payment Failed ❌</h2>
 
-<p>Hello,</p>
-
-<p>Your payment of
-<b>KES ${order.total}</b>
-timed out.</p>
-
-<p>Please try again.</p>
+<p>Your payment timed out.</p>
 
 `
 
