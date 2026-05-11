@@ -9,6 +9,10 @@ const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
+/* ================= ENTERPRISE ADDITION ================= */
+const http = require("http");
+const { Server } = require("socket.io");
+
 const app = express();
 
 /* ================= MIDDLEWARE ================= */
@@ -49,12 +53,12 @@ date: { type: Date, default: Date.now }
 });
 
 const Order = mongoose.model("Order", {
-orderId: { type: String, unique: true },
+orderId: String,
 phone: String,
 email: String,
 items: Array,
 total: Number,
-status: { type: String, default: "pending" },
+status: { type: String, default: "Pending" },
 date: { type: Date, default: Date.now }
 });
 
@@ -100,6 +104,12 @@ photo:req.file.path
 res.json(product);
 });
 
+/* ================= ORDERS ================= */
+app.get("/orders", verify, async (req,res)=>{
+const orders = await Order.find().sort({date:-1});
+res.json(orders);
+});
+
 /* ================= SASAPAY PAYMENT ================= */
 app.post("/sasapay/pay", async (req,res)=>{
 try{
@@ -121,17 +131,15 @@ const token = tokenRes.data.access_token;
 
 const orderId = "ORDER_" + Date.now();
 
-/* CREATE ORDER */
 await Order.create({
 orderId,
 phone,
 email,
 items,
 total,
-status:"pending"
+status:"Pending"
 });
 
-/* SEND PAYMENT REQUEST */
 const paymentRes = await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
@@ -156,101 +164,94 @@ Authorization:`Bearer ${token}`,
 res.json({
 success:true,
 orderId,
-checkoutRequestID: paymentRes.data?.CheckoutRequestID || null
+checkoutRequestID: paymentRes.data?.CheckoutRequestID || orderId
 });
 
 }catch(err){
 console.log(err.response?.data || err.message);
-
 res.status(500).json({
 success:false,
-error:"Payment request failed"
+error:err.message
 });
 }
 });
 
-/* ================= CALLBACK (FIXED + SAFE) ================= */
+/* ================= SOCKET (ENTERPRISE LIVE TRACKING) ================= */
+const server = http.createServer(app);
+
+const io = new Server(server, {
+cors: { origin: "*" }
+});
+
+io.on("connection", (socket) => {
+console.log("Client connected:", socket.id);
+
+socket.on("trackOrder", (orderId) => {
+socket.join(orderId);
+});
+});
+
+/* ================= CALLBACK (REAL-TIME FIXED) ================= */
 app.post("/sasapay/callback", async (req,res)=>{
 try{
 
-const data = req.body;
+console.log("CALLBACK:",req.body);
 
 const orderId =
-data?.TransactionReference ||
-data?.transaction_reference ||
-data?.transactionReference ||
-data?.OrderID;
+req.body?.TransactionReference ||
+req.body?.transactionReference ||
+req.body?.transaction_reference ||
+req.body?.OrderID;
 
-/* SAFETY CHECK */
-if(!orderId){
-return res.sendStatus(200);
-}
+const statusRaw =
+req.body?.status ||
+req.body?.Status ||
+req.body?.ResultCode;
 
-let statusRaw =
-data?.status ||
-data?.Status ||
-data?.ResultDesc ||
-data?.ResultCode;
+let status = (statusRaw || "").toString().toLowerCase();
 
-statusRaw = (statusRaw || "").toString().toLowerCase();
+/* ================= SUCCESS ================= */
+if(
+status.includes("success") ||
+status.includes("0") ||
+status.includes("completed")
+){
 
-/* SUCCESS DETECTION */
-const isSuccess =
-statusRaw.includes("success") ||
-statusRaw.includes("completed") ||
-statusRaw === "0";
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Paid"},
+{new:true}
+);
 
-/* UPDATE ORDER ONCE ONLY */
-const order = await Order.findOne({orderId});
-
-if(!order){
-return res.sendStatus(200);
-}
-
-/* prevent double overwrite */
-if(order.status === "success" || order.status === "failed"){
-return res.sendStatus(200);
-}
-
-if(isSuccess){
-
-order.status = "success";
-await order.save();
-
-if(order.email){
-await transporter.sendMail({
-from:process.env.EMAIL_USER,
-to:order.email,
-subject:"Payment Successful ✔",
-html:`<h2>Payment Successful</h2><p>Order ${orderId} paid successfully.</p>`
+/* LIVE PUSH */
+io.to(orderId).emit("statusUpdate", {
+status:"Paid",
+orderId
 });
+
+return res.sendStatus(200);
 }
 
-}else{
+/* ================= FAILED ================= */
+await Order.findOneAndUpdate(
+{orderId},
+{status:"Failed"}
+);
 
-order.status = "failed";
-await order.save();
-
-if(order.email){
-await transporter.sendMail({
-from:process.env.EMAIL_USER,
-to:order.email,
-subject:"Payment Failed ❌",
-html:`<h2>Payment Failed</h2><p>Order ${orderId} failed.</p>`
+io.to(orderId).emit("statusUpdate", {
+status:"Failed",
+orderId
 });
-}
-
-}
 
 return res.sendStatus(200);
 
 }catch(err){
 console.log("CALLBACK ERROR:",err);
-return res.sendStatus(200);
+return res.sendStatus(500);
 }
 });
 
-/* ================= ORDER STATUS ================= */
+/* ================= ORDER STATUS API ================= */
 app.get("/order-status", async (req,res)=>{
 try{
 
@@ -260,33 +261,40 @@ if(!order){
 return res.json({status:"notfound"});
 }
 
-return res.json({
-status:order.status
+let status = order.status;
+
+if(status === "Paid") status = "success";
+if(status === "Pending") status = "pending";
+if(status === "Failed") status = "failed";
+
+res.json({
+status,
+orderId: order.orderId
 });
 
 }catch(err){
-return res.json({status:"error"});
+res.json({status:"error"});
 }
 });
 
-/* ================= AUTO FAIL SAFETY ================= */
+/* ================= AUTO FAIL (SAFE) ================= */
 setInterval(async ()=>{
 
-const timeout = new Date(Date.now() - 2 * 60 * 1000);
+const timeout = new Date(Date.now() - 10 * 60 * 1000);
 
 await Order.updateMany(
 {
-status:"pending",
+status:"Pending",
 date:{$lt:timeout}
 },
-{status:"failed"}
+{status:"Failed"}
 );
 
-},15000);
+},30000);
 
-/* ================= START ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 10000;
 
-app.listen(PORT,()=>{
-console.log("🚀 Server running on port",PORT);
+server.listen(PORT,()=>{
+console.log("🚀 Enterprise server running on port",PORT);
 });
