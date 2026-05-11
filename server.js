@@ -14,7 +14,9 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+cors: { origin: "*" }
+});
 
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
@@ -45,9 +47,9 @@ const upload = multer({ storage });
 
 /* ================= MODELS ================= */
 const Product = mongoose.model("Product", {
-name: String,
-price: Number,
-image: String,
+name: { type: String, required: true },
+price: { type: Number, required: true },
+image: { type: String, required: true },
 date: { type: Date, default: Date.now }
 });
 
@@ -74,28 +76,51 @@ pass: process.env.EMAIL_PASS
 const ADMIN_TOKEN = "ADMIN_TOKEN_123";
 
 function verify(req, res, next) {
-if (req.headers.authorization === "Bearer " + ADMIN_TOKEN) return next();
+if (req.headers.authorization === "Bearer " + ADMIN_TOKEN) {
+return next();
+}
 return res.status(403).json({ error: "Unauthorized" });
 }
 
 /* ================= SOCKET ================= */
 io.on("connection", (socket) => {
-console.log("Client connected");
+console.log("Client connected:", socket.id);
 });
 
 /* ================= PRODUCTS ================= */
+
+/* GET PRODUCTS */
 app.get("/products", async (req, res) => {
 const products = await Product.find();
-res.json(products);
+
+res.json(products.map(p => ({
+_id: p._id,
+name: p.name,
+price: Number(p.price || 0),
+image: p.image || "https://via.placeholder.com/300"
+})));
 });
 
+/* CREATE PRODUCT */
 app.post("/products", verify, upload.single("image"), async (req, res) => {
+try {
+
+if (!req.file) {
+return res.status(400).json({ error: "Image required" });
+}
+
 const product = await Product.create({
 name: req.body.name,
-price: req.body.price,
+price: Number(req.body.price),
 image: req.file.path
 });
-res.json(product);
+
+res.json({ success: true, product });
+
+} catch (err) {
+console.log(err);
+res.status(500).json({ error: "Server error" });
+}
 });
 
 /* ================= ORDERS ================= */
@@ -104,13 +129,7 @@ const orders = await Order.find().sort({ date: -1 });
 res.json(orders);
 });
 
-/* 🔥 FIXED DELETE ORDER (THIS WAS MISSING) */
-app.delete("/order/:id", verify, async (req, res) => {
-await Order.findByIdAndDelete(req.params.id);
-res.json({ success: true });
-});
-
-/* ================= SASAPAY PAYMENT ================= */
+/* ================= PAYMENT ================= */
 app.post("/sasapay/pay", async (req, res) => {
 try {
 
@@ -122,7 +141,11 @@ const credentials = Buffer.from(
 
 const tokenRes = await axios.get(
 "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
-{ headers: { Authorization: `Basic ${credentials}` } }
+{
+headers: {
+Authorization: `Basic ${credentials}`
+}
+}
 );
 
 const token = tokenRes.data.access_token;
@@ -134,13 +157,13 @@ orderId,
 phone,
 email,
 items,
-total,
+total: Number(total),
 status: "Pending"
 });
 
 io.emit("new-order", order);
 
-await axios.post(
+const paymentRes = await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
 MerchantCode: process.env.SASAPAY_MERCHANT_CODE,
@@ -161,10 +184,15 @@ Authorization: `Bearer ${token}`,
 }
 );
 
-res.json({ success: true, orderId });
+res.json({
+success: true,
+orderId,
+checkoutRequestID: paymentRes.data?.CheckoutRequestID || orderId
+});
 
 } catch (err) {
-res.status(500).json({ success: false });
+console.log(err.response?.data || err.message);
+res.status(500).json({ success: false, error: err.message });
 }
 });
 
@@ -172,17 +200,25 @@ res.status(500).json({ success: false });
 app.post("/sasapay/callback", async (req, res) => {
 try {
 
-const orderId = req.body.TransactionReference || req.body.transactionReference;
-const statusRaw = (req.body.status || req.body.ResultCode || "").toString();
+const orderId =
+req.body?.TransactionReference ||
+req.body?.transactionReference ||
+req.body?.transaction_reference ||
+req.body?.OrderID;
 
-let status = "Failed";
+const statusRaw =
+req.body?.status ||
+req.body?.Status ||
+req.body?.ResultCode;
 
+let status = (statusRaw || "").toString().toLowerCase();
+
+/* SUCCESS */
 if (
-statusRaw.includes("success") ||
-statusRaw.includes("0") ||
-statusRaw.includes("completed")
+status.includes("success") ||
+status.includes("0") ||
+status.includes("completed")
 ) {
-status = "Paid";
 
 const order = await Order.findOneAndUpdate(
 { orderId },
@@ -190,50 +226,67 @@ const order = await Order.findOneAndUpdate(
 { new: true }
 );
 
+/* EMAIL SUCCESS */
 if (order?.email) {
 await transporter.sendMail({
 from: process.env.EMAIL_USER,
 to: order.email,
 subject: "Payment Successful ✔",
-html: `<h2>Payment Successful</h2><p>KES ${order.total}</p>`
+html: `
+<h2>Payment Successful</h2>
+<p>Order ID: ${order.orderId}</p>
+<p>Amount: KES ${order.total}</p>
+<p>Status: PAID</p>
+`
 });
 }
 
 io.emit("order-update", { orderId, status: "Paid" });
+
 return res.sendStatus(200);
 }
 
-/* FAILED FLOW */
-const order = await Order.findOneAndUpdate(
+/* FAILED */
+const failedOrder = await Order.findOneAndUpdate(
 { orderId },
 { status: "Failed" },
 { new: true }
 );
 
-if (order?.email) {
+/* EMAIL FAILED */
+if (failedOrder?.email) {
 await transporter.sendMail({
 from: process.env.EMAIL_USER,
-to: order.email,
+to: failedOrder.email,
 subject: "Payment Failed ❌",
-html: `<h2>Payment Failed</h2><p>Try again.</p>`
+html: `
+<h2>Payment Failed</h2>
+<p>Order ID: ${failedOrder.orderId}</p>
+<p>Amount: KES ${failedOrder.total}</p>
+<p>Status: FAILED</p>
+`
 });
 }
 
 io.emit("order-update", { orderId, status: "Failed" });
 
-res.sendStatus(200);
+return res.sendStatus(200);
 
 } catch (err) {
-res.sendStatus(500);
+console.log("CALLBACK ERROR:", err);
+return res.sendStatus(500);
 }
 });
 
-/* ================= STATUS ================= */
+/* ================= ORDER STATUS ================= */
 app.get("/order-status", async (req, res) => {
 const order = await Order.findOne({ orderId: req.query.orderId });
+
 if (!order) return res.json({ status: "NotFound" });
 
-res.json({ status: order.status.toLowerCase() });
+res.json({
+status: order.status.toLowerCase()
+});
 });
 
 /* ================= AUTO FAIL ================= */
@@ -241,13 +294,18 @@ setInterval(async () => {
 const timeout = new Date(Date.now() - 2 * 60 * 1000);
 
 await Order.updateMany(
-{ status: "Pending", date: { $lt: timeout } },
+{
+status: "Pending",
+date: { $lt: timeout }
+},
 { status: "Failed" }
 );
 
 }, 15000);
 
 /* ================= START ================= */
-server.listen(process.env.PORT || 10000, () => {
-console.log("🚀 Server running");
+const PORT = process.env.PORT || 10000;
+
+server.listen(PORT, () => {
+console.log("🚀 Server running on port", PORT);
 });
