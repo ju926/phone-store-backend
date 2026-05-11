@@ -11,24 +11,20 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
 
-/* ================= MIDDLEWARE ================= */
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-/* ================= FRONTEND ================= */
-
 const FRONTEND =
 "https://ju926.github.io/maloneti";
 
-/* ================= DATABASE ================= */
+/* DATABASE */
 
 mongoose.connect(process.env.MONGO_URL)
 .then(()=>console.log("✔ MongoDB Connected"))
 .catch(err=>console.log(err));
 
-/* ================= CLOUDINARY ================= */
+/* CLOUDINARY */
 
 cloudinary.config({
 cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
@@ -46,7 +42,7 @@ allowed_formats:["jpg","png","jpeg","webp"]
 
 const upload = multer({storage});
 
-/* ================= MODELS ================= */
+/* MODELS */
 
 const Product = mongoose.model("Product",{
 name:String,
@@ -70,19 +66,24 @@ default:Date.now
 }
 });
 
-/* ================= EMAIL ================= */
+/* EMAIL */
 
-const transporter = nodemailer.createTransport({
+const transporter =
+nodemailer.createTransport({
+
 service:"gmail",
+
 auth:{
 user:process.env.EMAIL_USER,
 pass:process.env.EMAIL_PASS
 }
+
 });
 
-/* ================= ADMIN ================= */
+/* ADMIN */
 
-const ADMIN_TOKEN = "ADMIN_TOKEN_123";
+const ADMIN_TOKEN =
+"ADMIN_TOKEN_123";
 
 function verify(req,res,next){
 
@@ -101,15 +102,18 @@ error:"Unauthorized"
 
 app.post("/admin-login",(req,res)=>{
 
-const {email,password} = req.body;
+const {email,password} =
+req.body;
 
 if(
 email === process.env.ADMIN_EMAIL &&
 password === process.env.ADMIN_PASSWORD
 ){
+
 return res.json({
 token:ADMIN_TOKEN
 });
+
 }
 
 return res.status(401).json({
@@ -118,14 +122,11 @@ error:"Login failed"
 
 });
 
-/* ================= PRODUCTS ================= */
+/* PRODUCTS */
 
 app.get("/products", async(req,res)=>{
 
-const products =
-await Product.find();
-
-res.json(products);
+res.json(await Product.find());
 
 });
 
@@ -141,9 +142,7 @@ const product =
 await Product.create({
 
 name:req.body.name,
-
 price:req.body.price,
-
 image:req.file.path
 
 });
@@ -191,9 +190,12 @@ success:true
 
 });
 
-/* ================= ORDERS ================= */
+/* ORDERS */
 
-app.get("/orders",verify,async(req,res)=>{
+app.get(
+"/orders",
+verify,
+async(req,res)=>{
 
 const orders =
 await Order.find()
@@ -215,8 +217,6 @@ req.params.id,
 {new:true}
 );
 
-/* EMAIL */
-
 if(order?.email){
 
 await transporter.sendMail({
@@ -229,7 +229,7 @@ subject:"Payment Successful ✔",
 
 html:`
 
-<h2>Payment Successful</h2>
+<h2>Payment Successful ✔</h2>
 
 <p>Your payment of
 <b>KES ${order.total}</b>
@@ -247,8 +247,6 @@ success:true
 
 });
 
-/* DELETE ORDER */
-
 app.delete(
 "/order/:id",
 verify,
@@ -264,7 +262,7 @@ success:true
 
 });
 
-/* ================= SASAPAY PAYMENT ================= */
+/* SASAPAY PAYMENT */
 
 app.post("/sasapay/pay", async(req,res)=>{
 
@@ -279,15 +277,18 @@ items
 
 /* TOKEN */
 
-const credentials = Buffer.from(
+const credentials =
+Buffer.from(
 `${process.env.SASAPAY_CLIENT_ID}:${process.env.SASAPAY_CLIENT_SECRET}`
 ).toString("base64");
 
-const tokenRes = await axios.get(
+const tokenRes =
+await axios.get(
 "https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials",
 {
 headers:{
-Authorization:`Basic ${credentials}`
+Authorization:
+`Basic ${credentials}`
 }
 }
 );
@@ -311,7 +312,8 @@ status:"Pending"
 
 /* PAYMENT */
 
-const paymentRes = await axios.post(
+const paymentRes =
+await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
 MerchantCode:
@@ -329,7 +331,8 @@ Currency:"KES",
 
 Amount:total,
 
-TransactionDesc:"Phone Store Payment",
+TransactionDesc:
+"Phone Store Payment",
 
 CallBackURL:
 process.env.CALLBACK_URL
@@ -364,9 +367,11 @@ err.response?.data || err.message
 
 });
 
-/* ================= CALLBACK ================= */
+/* CALLBACK */
 
-app.post("/sasapay/callback", async(req,res)=>{
+app.post(
+"/sasapay/callback",
+async(req,res)=>{
 
 try{
 
@@ -387,8 +392,6 @@ await Order.findOneAndUpdate(
 {status:"Paid"},
 {new:true}
 );
-
-/* EMAIL */
 
 if(order?.email){
 
@@ -415,8 +418,7 @@ was successful.</p>
 }
 
 return res.redirect(
-FRONTEND +
-"/confirm.html"
+FRONTEND + "/confirm.html"
 );
 
 }
@@ -429,8 +431,6 @@ await Order.findOneAndUpdate(
 {status:"Failed"},
 {new:true}
 );
-
-/* FAILED EMAIL */
 
 if(order?.email){
 
@@ -447,7 +447,7 @@ html:`
 <h2>Payment Failed ❌</h2>
 
 <p>Your payment failed
-or was cancelled.</p>
+or timed out.</p>
 
 `
 
@@ -456,8 +456,7 @@ or was cancelled.</p>
 }
 
 return res.redirect(
-FRONTEND +
-"/failed.html"
+FRONTEND + "/failed.html"
 );
 
 }catch(err){
@@ -465,17 +464,18 @@ FRONTEND +
 console.log(err);
 
 return res.redirect(
-FRONTEND +
-"/failed.html"
+FRONTEND + "/failed.html"
 );
 
 }
 
 });
 
-/* ================= STATUS ================= */
+/* STATUS */
 
-app.get("/order-status", async(req,res)=>{
+app.get(
+"/order-status",
+async(req,res)=>{
 
 const order =
 await Order.findOne({
@@ -496,28 +496,29 @@ status:order.status
 
 });
 
-/* ================= AUTO FAIL ================= */
+/* AUTO FAIL */
 
 setInterval(async()=>{
 
-const oldOrders =
+const orders =
 await Order.find({
+
 status:"Pending",
+
 date:{
 $lt:new Date(
 Date.now()-10000
 )
 }
+
 });
 
-for(const order of oldOrders){
+for(const order of orders){
 
 await Order.findByIdAndUpdate(
 order._id,
 {status:"Failed"}
 );
-
-/* EMAIL */
 
 if(order.email){
 
@@ -545,7 +546,7 @@ html:`
 
 },5000);
 
-/* ================= START ================= */
+/* START */
 
 const PORT =
 process.env.PORT || 10000;
