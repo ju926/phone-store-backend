@@ -49,12 +49,12 @@ date: { type: Date, default: Date.now }
 });
 
 const Order = mongoose.model("Order", {
-orderId: String,
+orderId: { type: String, unique: true },
 phone: String,
 email: String,
 items: Array,
 total: Number,
-status: { type: String, default: "Pending" },
+status: { type: String, default: "pending" },
 date: { type: Date, default: Date.now }
 });
 
@@ -100,13 +100,7 @@ photo:req.file.path
 res.json(product);
 });
 
-/* ================= ORDERS ================= */
-app.get("/orders", verify, async (req,res)=>{
-const orders = await Order.find().sort({date:-1});
-res.json(orders);
-});
-
-/* ================= SASAPAY PAY ================= */
+/* ================= SASAPAY PAYMENT ================= */
 app.post("/sasapay/pay", async (req,res)=>{
 try{
 
@@ -127,15 +121,17 @@ const token = tokenRes.data.access_token;
 
 const orderId = "ORDER_" + Date.now();
 
+/* CREATE ORDER */
 await Order.create({
 orderId,
 phone,
 email,
 items,
 total,
-status:"Pending"
+status:"pending"
 });
 
+/* SEND PAYMENT REQUEST */
 const paymentRes = await axios.post(
 "https://sandbox.sasapay.app/api/v1/payments/request-payment/",
 {
@@ -160,111 +156,130 @@ Authorization:`Bearer ${token}`,
 res.json({
 success:true,
 orderId,
-checkoutRequestID: paymentRes.data?.CheckoutRequestID || orderId
+checkoutRequestID: paymentRes.data?.CheckoutRequestID || null
 });
 
 }catch(err){
 console.log(err.response?.data || err.message);
+
 res.status(500).json({
 success:false,
-error:err.message
+error:"Payment request failed"
 });
 }
 });
 
-/* ================= CALLBACK (FIXED) ================= */
+/* ================= CALLBACK (FIXED + SAFE) ================= */
 app.post("/sasapay/callback", async (req,res)=>{
 try{
 
-console.log("CALLBACK:",req.body);
+const data = req.body;
 
 const orderId =
-req.body?.TransactionReference ||
-req.body?.transactionReference ||
-req.body?.transaction_reference ||
-req.body?.OrderID;
+data?.TransactionReference ||
+data?.transaction_reference ||
+data?.transactionReference ||
+data?.OrderID;
 
-const statusRaw =
-req.body?.status ||
-req.body?.Status ||
-req.body?.ResultCode;
+/* SAFETY CHECK */
+if(!orderId){
+return res.sendStatus(200);
+}
 
-let status = (statusRaw || "").toString().toLowerCase();
+let statusRaw =
+data?.status ||
+data?.Status ||
+data?.ResultDesc ||
+data?.ResultCode;
 
-/* SUCCESS */
-if(status.includes("success") || status.includes("0") || status.includes("completed")){
+statusRaw = (statusRaw || "").toString().toLowerCase();
 
-const order = await Order.findOneAndUpdate(
-{orderId},
-{status:"Paid"},
-{new:true}
-);
+/* SUCCESS DETECTION */
+const isSuccess =
+statusRaw.includes("success") ||
+statusRaw.includes("completed") ||
+statusRaw === "0";
 
-if(order?.email){
+/* UPDATE ORDER ONCE ONLY */
+const order = await Order.findOne({orderId});
+
+if(!order){
+return res.sendStatus(200);
+}
+
+/* prevent double overwrite */
+if(order.status === "success" || order.status === "failed"){
+return res.sendStatus(200);
+}
+
+if(isSuccess){
+
+order.status = "success";
+await order.save();
+
+if(order.email){
 await transporter.sendMail({
 from:process.env.EMAIL_USER,
 to:order.email,
 subject:"Payment Successful ✔",
-html:`<h2>Payment Successful</h2><p>KES ${order.total}</p>`
+html:`<h2>Payment Successful</h2><p>Order ${orderId} paid successfully.</p>`
 });
 }
 
-return res.sendStatus(200);
+}else{
+
+order.status = "failed";
+await order.save();
+
+if(order.email){
+await transporter.sendMail({
+from:process.env.EMAIL_USER,
+to:order.email,
+subject:"Payment Failed ❌",
+html:`<h2>Payment Failed</h2><p>Order ${orderId} failed.</p>`
+});
 }
 
-/* FAILED */
-await Order.findOneAndUpdate(
-{orderId},
-{status:"Failed"}
-);
+}
 
 return res.sendStatus(200);
 
 }catch(err){
 console.log("CALLBACK ERROR:",err);
-return res.sendStatus(500);
+return res.sendStatus(200);
 }
 });
 
-/* ================= ORDER STATUS (LIVE TRACKING) ================= */
+/* ================= ORDER STATUS ================= */
 app.get("/order-status", async (req,res)=>{
 try{
 
-const orderId = req.query.orderId;
-
-const order = await Order.findOne({orderId});
+const order = await Order.findOne({orderId:req.query.orderId});
 
 if(!order){
-return res.json({status:"NotFound"});
+return res.json({status:"notfound"});
 }
 
-let status = order.status.toLowerCase();
-
-if(status === "paid") status = "success";
-if(status === "failed") status = "failed";
-if(status === "pending") status = "pending";
-
-res.json({
-status,
-orderId
+return res.json({
+status:order.status
 });
 
 }catch(err){
-res.json({status:"error"});
+return res.json({status:"error"});
 }
 });
 
-/* ================= AUTO FAIL ================= */
+/* ================= AUTO FAIL SAFETY ================= */
 setInterval(async ()=>{
 
 const timeout = new Date(Date.now() - 2 * 60 * 1000);
 
 await Order.updateMany(
 {
-status:"Pending",
+status:"pending",
 date:{$lt:timeout}
 },
-{status:"Failed"}
+{status:"failed"}
 );
 
 },15000);
